@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LankaLearn LMS – Sign In</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800&family=DM+Sans:wght@300;400;500;700&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="/static/styles.css">
+
+    <style>
+        :root {
+            --sl-gold: #ffbe0b; 
+            --sl-blue: #1e3a8a;
+        }
+
+        body.login-body {
+            min-height: 100vh;
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            font-family: 'DM Sans', sans-serif;
+            background: #ffffff;
+            margin: 0;
+        }
+
+        /* --- Left Panel (The "Hero" Section) --- */
+        .login-left {
+            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 60px 10%;
+            position: relative;
+            overflow: hidden;
+            color: white;
+        }
+
+        /* Large Blurred Background Logo (The Watermark) */
+        .bg-watermark {
+            position: absolute;
+            right: -10%;
+            bottom: -5%;
+            width: 80%;
+            opacity: 0.15;
+            filter: blur(40px) brightness(1.5);
+            pointer-events: none;
+            transform: rotate(-15deg);
+            z-index: 0;
+        }
+
+        .brand-logo-container {
+            position: relative;
+            z-index: 2;
+            margin-bottom: 60px;
+        }
+
+        /* Main Logo */
+        .main-logo {
+            height: 100px; 
+            width: auto;
+            margin-bottom: 20px;
+            filter: drop-shadow(0 10px 15px rgba(0,0,0,0.2));
+        }
+
+        .brand-name {
+            font-family: 'Playfair Display', serif;
+            font-size: 42px;
+            font-weight: 800;
+            line-height: 1;
+            background: linear-gradient(to right, #ffffff, #f0f0f0);
+            -webkit-background-clip: text;
+            background-clip: text; /* FIX: Added standard property */
+            -webkit-text-fill-color: transparent;
+        }
+
+        .brand-tagline {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--sl-gold);
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            margin-top: 8px;
+        }
+
+        .login-headline {
+            font-family: 'Playfair Display', serif;
+            font-size: 58px;
+            line-height: 1.05;
+            font-weight: 700;
+            margin-bottom: 20px;
+            position: relative;
+            z-index: 2;
+        }
+
+        .login-headline span {
+            color: var(--sl-gold);
+        }
+
+        .login-subtext {
+            font-size: 20px;
+            color: rgba(255,255,255,0.85);
+            line-height: 1.6;
+            max-width: 480px;
+            position: relative;
+            z-index: 2;
+            font-weight: 300;
+        }
+
+        /* --- Right Panel (Clean & Modern) --- */
+        .login-right {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 60px;
+            background: #f8fafc;
+        }
+
+        .login-card {
+            width: 100%;
+            max-width: 420px;
+            background: white;
+            padding: 40px;
+            border-radius: 24px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.05);
+        }
+
+        .login-title {
+            font-family: 'Playfair Display', serif;
+            font-size: 32px;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 8px;
+        }
+
+        .login-subtitle {
+            font-size: 15px;
+            color: #64748b;
+            margin-bottom: 32px;
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 16px;
+            background: #1e40af;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            margin-top: 10px;
+            box-shadow: 0 4px 14px rgba(30, 64, 175, 0.4);
+        }
+
+        .login-btn:hover {
+            background: #1e3a8a;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(30, 64, 175, 0.5);
+        }
+
+        /* Form Controls */
+        .form-group label {
+            font-size: 12px;
+            font-weight: 700;
+            color: #475569;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .form-control {
+            border: 2px solid #e2e8f0 !important;
+            padding: 14px !important;
+            border-radius: 12px !important;
+            background: #ffffff !important;
+            font-size: 15px !important;
+        }
+
+        .form-control:focus {
+            border-color: #1e40af !important;
+            box-shadow: 0 0 0 4px rgba(30, 64, 175, 0.1) !important;
+        }
+
+        /* Demo Section */
+        .demo-creds {
+            margin-top: 32px;
+            border-top: 1px dashed #e2e8f0;
+            padding-top: 24px;
+        }
+
+        .demo-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 4px;
+            transition: all 0.2s;
+            font-size: 13px;
+        }
+
+        .demo-row:hover {
+            background: #eff6ff;
+            color: #1e40af;
+        }
+
+        @media (max-width: 1024px) {
+            body.login-body { grid-template-columns: 1fr; }
+            .login-left { display: none; }
+        }
+    </style>
+</head>
+<body class="login-body">
+
+<div class="login-left">
+    <img src="/static/logo/logo.PNG" class="bg-watermark" alt="">
+
+    <div class="brand-logo-container">
+        <img src="/static/logo/logo.PNG" class="main-logo" alt="LankaLearn Logo">
+        <div class="brand-name">LankaLearn</div>
+        <div class="brand-tagline">Education Reimagined</div>
+    </div>
+
+    <h1 class="login-headline">The Future of <span>Sri Lankan</span> Excellence.</h1>
+    <p class="login-subtext">
+        The premier digital environment for O/L and A/L mastery. Designed for students, trusted by educators.
+    </p>
+</div>
+
+<div class="login-right">
+    <div class="login-card">
+        <h2 class="login-title">Sign In</h2>
+        <p class="login-subtitle">Enter your credentials to access the LMS</p>
+
+        <div class="error-msg" id="loginError"></div>
+
+        <form id="loginForm">
+            <div class="form-group">
+                <label>Username</label>
+                <input type="text" id="username" class="form-control" placeholder="username" required autocomplete="username">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="password" class="form-control" placeholder="••••••••" required autocomplete="current-password">
+            </div>
+            <button type="submit" class="login-btn">Secure Login</button>
+        </form>
+
+        <div class="demo-creds">
+            <div class="demo-row" onclick="fillCreds('admin','admin123')">
+                <span class="bold">🔐 Administrator</span>
+                <span class="text-muted">admin / admin123</span>
+            </div>
+            <div class="demo-row" onclick="fillCreds('nimal.teacher','teacher123')">
+                <span class="bold">👨‍🏫 Teacher Access</span>
+                <span class="text-muted">nimal.teacher</span>
+            </div>
+            <div class="demo-row" onclick="fillCreds('kasun','student123')">
+                <span class="bold">🎒 Student Portal</span>
+                <span class="text-muted">kasun / student123</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function fillCreds(u, p) {
+        document.getElementById('username').value = u;
+        document.getElementById('password').value = p;
+        document.getElementById('username').focus();
+    }
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const errEl = document.getElementById('loginError');
+        const btn = e.target.querySelector('button');
+        
+        errEl.style.display = 'none';
+        btn.textContent = 'Verifying...';
+        btn.disabled = true;
+
+        const fd = new FormData();
+        fd.append('username', document.getElementById('username').value);
+        fd.append('password', document.getElementById('password').value);
+
+        try {
+            const res = await fetch('/api/auth/login', { method:'POST', body: fd });
+            if (res.ok) {
+                window.location.href = '/dashboard';
+            } else {
+                const data = await res.json();
+                errEl.textContent = data.detail || 'Authentication failed.';
+                errEl.style.display = 'block';
+                btn.textContent = 'Secure Login';
+                btn.disabled = false;
+            }
+        } catch (err) {
+            errEl.textContent = 'Connection error.';
+            errEl.style.display = 'block';
+            btn.textContent = 'Secure Login';
+            btn.disabled = false;
+        }
+    });
+</script>
+</body>
+</html>
