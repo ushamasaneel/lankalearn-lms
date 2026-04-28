@@ -216,6 +216,8 @@ function showCreateCourse() {
     { label: 'Course Code', name: 'code', placeholder: 'e.g. OL-MATH-11', required: true },
     { label: 'Course Name', name: 'name', placeholder: 'e.g. O/L Mathematics', required: true },
     { label: 'Description', name: 'description', type: 'textarea', placeholder: 'Brief description…' },
+    { label: 'Start Date', name: 'start_date', type: 'date', required: true },
+    { label: 'End Date', name: 'end_date', type: 'date', required: true },
     { label: 'Teacher', name: 'teacher_id', type: 'select', required: true,
       options: teachers.map(t => ({ value: t.id, label: t.full_name })) },
   ], async (fd) => {

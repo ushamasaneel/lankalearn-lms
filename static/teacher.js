@@ -75,6 +75,7 @@ async function renderTeacherCourse(courseId) {
       <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-quizzes')">📝 Quizzes</button>
       <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-rubrics')">🏷️ Rubrics</button>
       <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-syllabus')">📋 Syllabus</button>
+      <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-attendance')">📅 Attendance</button>
     </nav>
     <div id="tc-modules" class="tc-panel"></div>
     <div id="tc-assignments" class="tc-panel" style="display:none"></div>
@@ -85,6 +86,7 @@ async function renderTeacherCourse(courseId) {
     <div id="tc-quizzes" class="tc-panel" style="display:none"></div>
     <div id="tc-rubrics" class="tc-panel" style="display:none"></div>
     <div id="tc-syllabus" class="tc-panel" style="display:none"></div>
+    <div id="tc-attendance" class="tc-panel" style="display:none"></div>
   `;
   setContent(navHtml);
   tcLoadModules();
@@ -105,6 +107,29 @@ function tcSwitchTab(btn, id) {
     'tc-quizzes': tcLoadQuizzes,
     'tc-rubrics': tcLoadRubrics,
     'tc-syllabus': tcLoadSyllabus,
+    'tc-attendance': tcLoadAttendance,
+  };
+  if (loaders[id]) loaders[id]();
+}
+
+
+
+function tcSwitchTab(btn, id) {
+  document.querySelectorAll('.course-nav-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tc-panel').forEach(p => p.style.display = 'none');
+  btn.classList.add('active');
+  document.getElementById(id).style.display = 'block';
+  const loaders = {
+    'tc-modules': tcLoadModules,
+    'tc-assignments': tcLoadAssignments,
+    'tc-discussions': tcLoadDiscussions,
+    'tc-announcements': tcLoadAnnouncements,
+    'tc-gradebook': tcLoadGradebook,
+    'tc-materials': tcLoadMaterials,
+    'tc-quizzes': tcLoadQuizzes,
+    'tc-rubrics': tcLoadRubrics,
+    'tc-syllabus': tcLoadSyllabus,
+    'tc-attendance': tcLoadAttendance,
   };
   if (loaders[id]) loaders[id]();
 }
@@ -266,12 +291,13 @@ async function tcLoadAssignments() {
 
   if (!assignments.length) { html += emptyState('✏️','No assignments yet.'); }
   else {
-    html += '<div class="card"><div class="table-wrapper"><table><thead><tr><th>Title</th><th>Due Date</th><th>Points</th><th>Rubric</th><th>Actions</th></tr></thead><tbody>';
+    html += '<div class="card"><div class="table-wrapper"><table><thead><tr><th>Title</th><th>File</th><th>Due Date</th><th>Points</th><th>Rubric</th><th>Actions</th></tr></thead><tbody>';
     html += assignments.map(a => {
       const due = daysUntil(a.due_date);
       const rubric = rubrics.find(r => r.id === a.rubric_id);
       return `<tr>
         <td><strong>${escHtml(a.title)}</strong><br><span class="text-sm text-muted">${escHtml((a.description||'').slice(0,60))}…</span></td>
+          ${a.file_name ? `<td><a href="/uploads/${encodeURIComponent(a.file_name)}" target="_blank">${escHtml(a.file_name)}</a></td>` : `<td class="text-muted">—</td>`}
         <td>${fmtDate(a.due_date)} ${due ? `<span class="badge ${due.cls}">${due.label}</span>` : ''}</td>
         <td>${a.points} pts</td>
         <td>${rubric ? `<span class="badge badge-purple">${escHtml(rubric.title)}</span>` : '<span class="text-muted">—</span>'}</td>
@@ -292,6 +318,7 @@ async function tcCreateAssignment() {
     { label: 'Points', name: 'points', type: 'number', value: '100' },
     { label: 'Rubric (optional)', name: 'rubric_id', type: 'select',
       options: [{ value:'', label:'— None —' }, ...rubrics.map(r => ({ value: r.id, label: r.title }))] },
+    { label: 'Upload Assignment File', name: 'file', type: 'file' },
   ], async (fd) => {
     try {
       await apiPost(`/api/courses/${_tcCourseId}/assignments`, fd);
@@ -327,28 +354,16 @@ async function tcViewAssignmentSubmissions(assignmentId) {
     html += submissions.map(s => `
       <div class="card mb-16">
         <div class="card-header">
-          <span class="card-title">👤 ${escHtml(s.full_name)}</span>
-          <div class="flex gap-8">
-            <span class="text-sm text-muted">${fmtDateTime(s.submitted_at)}</span>
-            ${s.grade !== null ? `<span class="badge badge-green">Graded: ${s.grade}/${assignment?.points}</span>` : '<span class="badge badge-yellow">Ungraded</span>'}
-          </div>
+          <span class="card-title">${escHtml(s.full_name)}</span>
+          ${s.grade !== null ? `<span class="badge badge-green">${s.grade}%</span>` : '<span class="badge badge-yellow">Needs Grading</span>'}
         </div>
         <div class="card-body">
-          ${s.text_response ? `<div class="mb-16"><strong>Response:</strong><div class="submission-view"><pre style="white-space:pre-wrap;font-family:inherit;font-size:13px">${escHtml(s.text_response)}</pre></div></div>` : ''}
-          ${s.file_name ? `<div class="alert alert-info mb-16">📎 Submitted file: <strong>${escHtml(s.file_name)}</strong></div>` : ''}
-          ${s.feedback ? `<div class="alert alert-success mb-16">💬 Feedback: ${escHtml(s.feedback)}</div>` : ''}
-          <div style="border-top:1px solid var(--border);padding-top:16px">
-            <div class="form-row form-row-2">
-              <div class="form-group">
-                <label>Grade (out of ${assignment?.points})</label>
-                <input class="form-control" type="number" id="grade-${s.id}" value="${s.grade ?? ''}" min="0" max="${assignment?.points}">
-              </div>
-              <div class="form-group">
-                <label>Feedback</label>
-                <input class="form-control" id="feedback-${s.id}" value="${escHtml(s.feedback||'')}" placeholder="Write feedback…">
-              </div>
-            </div>
-            <button class="btn btn-success btn-sm" onclick="tcGradeSubmission(${assignmentId},${s.id},${assignment?.points})">💾 Save Grade</button>
+          ${s.file_name ? `<div class="mb-12">📂 <strong>Attached File:</strong> <a href="/uploads/${s.file_name}" target="_blank" class="btn btn-secondary btn-xs">Open Submission</a></div>` : ''}
+          <div class="form-row mt-12">
+            <input type="number" id="grade-${s.id}" class="form-control" placeholder="Marks" value="${s.grade||''}">
+            <input type="text" id="feedback-${s.id}" class="form-control" placeholder="Feedback" value="${s.feedback||''}">
+            <button class="btn btn-success" onclick="tcGradeSubmission(${assignmentId}, ${s.id}, ${assignment.points})">Save</button>
+            ${s.grade !== null ? `<button class="btn btn-warning" onclick="tcRegradeSubmission(${assignmentId}, ${s.id}, ${assignment.points})">Regrade</button>` : ''}
           </div>
         </div>
       </div>
@@ -367,6 +382,19 @@ async function tcGradeSubmission(assignmentId, submissionId, maxPts) {
   try {
     await apiPost(`/api/courses/${_tcCourseId}/assignments/${assignmentId}/submissions/${submissionId}/grade`, fd);
     showToast('Grade saved!', 'success');
+    tcViewAssignmentSubmissions(assignmentId);
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function tcRegradeSubmission(assignmentId, submissionId, maxPts) {
+  const grade = document.getElementById(`grade-${submissionId}`).value;
+  const feedback = document.getElementById(`feedback-${submissionId}`).value;
+  if (grade === '') { showToast('Enter a grade', 'error'); return; }
+  if (parseFloat(grade) > maxPts) { showToast(`Max points is ${maxPts}`, 'error'); return; }
+  const fd = buildForm({ grade, feedback });
+  try {
+    await apiPost(`/api/courses/${_tcCourseId}/assignments/${assignmentId}/submissions/${submissionId}/regrade`, fd);
+    showToast('Submission regraded!', 'success');
     tcViewAssignmentSubmissions(assignmentId);
   } catch (e) { showToast(e.message, 'error'); }
 }
@@ -395,6 +423,7 @@ async function tcLoadDiscussions() {
         </div>
         <div class="card-body">
           <p style="font-size:13.5px;color:var(--text-muted)">${escHtml(d.prompt||'')}</p>
+          ${d.file_name ? `<div class="text-sm" style="color:var(--primary);margin-top:8px">📎 <a href="/uploads/${encodeURIComponent(d.file_name)}" target="_blank">${escHtml(d.file_name)}</a></div>` : ''}
         </div>
       </div>`).join('');
   }
@@ -407,6 +436,7 @@ async function tcCreateDiscussion() {
     { label: 'Prompt / Instructions', name: 'prompt', type: 'textarea', placeholder: 'What should students discuss?' },
     { label: 'Due Date (optional)', name: 'due_date', type: 'datetime-local' },
     { label: 'Graded?', name: 'graded', type: 'select', options: [{ value:0, label:'No' }, { value:1, label:'Yes' }] },
+    { label: 'Upload Discussion File', name: 'file', type: 'file' },
   ], async (fd) => {
     try {
       await apiPost(`/api/courses/${_tcCourseId}/discussions`, fd);
@@ -478,6 +508,7 @@ async function tcLoadAnnouncements() {
         <div class="ann-title">📢 ${escHtml(a.title)}</div>
         <div class="ann-meta">By ${escHtml(a.author_name)} · ${fmtDateTime(a.created_at)}</div>
         <div class="ann-body">${escHtml(a.body||'')}</div>
+        ${a.file_name ? `<div class="text-sm" style="color:var(--primary);margin-top:8px">📎 <a href="/uploads/${encodeURIComponent(a.file_name)}" target="_blank">${escHtml(a.file_name)}</a></div>` : ''}
       </div>`).join('')}</div>`;
   }
   panel.innerHTML = html;
@@ -487,6 +518,7 @@ async function tcCreateAnnouncement() {
   openModal('Post Announcement', modalForm([
     { label: 'Title', name: 'title', placeholder: 'Announcement title…', required: true },
     { label: 'Message', name: 'body', type: 'textarea', placeholder: 'Write your announcement…' },
+    { label: 'Upload Attachment', name: 'file', type: 'file' },
   ], async (fd) => {
     try {
       await apiPost(`/api/courses/${_tcCourseId}/announcements`, fd);
@@ -552,7 +584,7 @@ async function tcLoadMaterials() {
         <div style="flex:1">
           <div style="font-weight:700;font-size:14px">${escHtml(m.title)}</div>
           <div class="text-sm text-muted">${escHtml((m.content||'').slice(0,80))}…</div>
-          ${m.file_name ? `<div class="text-sm" style="color:var(--primary);margin-top:4px">📎 ${escHtml(m.file_name)}</div>` : ''}
+          ${m.file_name ? `<div class="text-sm" style="color:var(--primary);margin-top:4px">📎 <a href="/uploads/${encodeURIComponent(m.file_name)}" target="_blank">${escHtml(m.file_name)}</a></div>` : ''}
         </div>
         <div class="text-sm text-muted">${fmtDate(m.created_at)}</div>
       </div>`).join('')}</div>`;
@@ -564,7 +596,7 @@ async function tcCreateMaterial() {
   openModal('Add Course Material', modalForm([
     { label: 'Title', name: 'title', placeholder: 'Material title…', required: true },
     { label: 'Content / Description', name: 'content', type: 'textarea', placeholder: 'Description or content…' },
-    { label: 'File Name (simulated upload)', name: 'file_name', placeholder: 'e.g. chapter1.pdf' },
+    { label: 'Upload File (PDF, DOC, PPT, etc.)', name: 'file', type: 'file' },
   ], async (fd) => {
     try {
       await apiPost(`/api/courses/${_tcCourseId}/materials`, fd);
@@ -573,7 +605,9 @@ async function tcCreateMaterial() {
   }, 'Add Material'));
 }
 
-// ---- Quizzes ----
+// ---- Quizzes & Unified Quiz Builder ----
+let _draftQuestions = []; // Temporarily holds questions while building
+
 async function tcLoadQuizzes() {
   const panel = document.getElementById('tc-quizzes');
   if (!panel) return;
@@ -581,34 +615,220 @@ async function tcLoadQuizzes() {
   const quizzes = await api(`/api/courses/${_tcCourseId}/quizzes`);
 
   let html = `<div class="flex gap-8 mb-16">
-    <button class="btn btn-primary" onclick="tcCreateQuiz()">+ New Quiz</button>
+    <button class="btn btn-primary" onclick="tcOpenQuizBuilder()">🚀 Create New Quiz</button>
   </div>`;
 
-  if (!quizzes.length) { html += emptyState('📝','No quizzes yet.'); }
+  if (!quizzes.length) { html += emptyState('📝','No quizzes yet. Click Create New Quiz to build one.'); }
   else {
-    html += `<div class="card"><div class="table-wrapper"><table><thead><tr><th>Title</th><th>Description</th><th>Due Date</th></tr></thead><tbody>
+    html += `<div class="card"><div class="table-wrapper"><table><thead><tr><th>Title</th><th>Time Limit</th><th>Due Date</th><th>Actions</th></tr></thead><tbody>
     ${quizzes.map(q => `<tr>
-      <td><strong>📝 ${escHtml(q.title)}</strong></td>
-      <td class="text-muted">${escHtml((q.description||'').slice(0,80))}</td>
+      <td><strong>📝 ${escHtml(q.title)}</strong><br><span class="text-sm text-muted">${escHtml((q.description||'').slice(0,60))}</span></td>
+      <td>${q.time_limit > 0 ? q.time_limit + ' mins' : 'Unlimited'}</td>
       <td>${fmtDate(q.due_date)}</td>
+      <td><button class="btn btn-secondary btn-sm" onclick="tcPreviewQuiz(${q.id})">👀 Preview Answer Key</button></td> 
     </tr>`).join('')}</tbody></table></div></div>`;
   }
   panel.innerHTML = html;
 }
 
-async function tcCreateQuiz() {
-  openModal('Create Quiz', modalForm([
-    { label: 'Title', name: 'title', placeholder: 'Quiz title…', required: true },
-    { label: 'Description', name: 'description', type: 'textarea', placeholder: 'Instructions…' },
-    { label: 'Due Date', name: 'due_date', type: 'datetime-local' },
-  ], async (fd) => {
-    try {
-      await apiPost(`/api/courses/${_tcCourseId}/quizzes`, fd);
-      closeModal(); showToast('Quiz created!', 'success'); tcLoadQuizzes();
-    } catch (e) { showToast(e.message, 'error'); }
-  }, 'Create Quiz'));
+// 1. Open the Unified Quiz Builder Modal
+function tcOpenQuizBuilder() {
+  _draftQuestions = []; 
+  let html = `
+    <div class="form-row form-row-2">
+      <div class="form-group"><label>Quiz Title</label><input type="text" id="qbTitle" class="form-control" placeholder="e.g. Midterm Exam" required></div>
+      <div class="form-group"><label>Due Date</label><input type="datetime-local" id="qbDue" class="form-control"></div>
+    </div>
+    <div class="form-row form-row-3">
+      <div class="form-group"><label>Time Limit (Mins, 0 = no limit)</label><input type="number" id="qbTime" class="form-control" value="0"></div>
+      <div class="form-group"><label>Max Attempts</label><input type="number" id="qbAttempts" class="form-control" value="1" min="1"></div>
+      <div class="form-group"><label>Upload File (Optional)</label><input type="file" id="qbFile" class="form-control" style="padding:6px"></div>
+    </div>
+    <div class="form-group"><label>Description / Instructions</label><input type="text" id="qbDesc" class="form-control" placeholder="Instructions..."></div>
+    <hr style="margin:24px 0; border:0; border-top:1px solid var(--border)">
+    <div class="flex" style="justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h3 style="margin:0; font-size:16px">Questions & Answer Key</h3>
+      <div class="flex gap-8">
+        <button class="btn btn-secondary btn-sm" onclick="tcAddDraftQuestion('multiple_choice')">+ Multiple Choice</button>
+        <button class="btn btn-secondary btn-sm" onclick="tcAddDraftQuestion('true_false')">+ True/False</button>
+      </div>
+    </div>
+    <div id="qbQuestionsList" style="max-height: 400px; overflow-y: auto; padding-right:8px;"></div>
+    <div class="flex mt-24" style="justify-content:flex-end; gap:10px; border-top:1px solid var(--border); padding-top:16px;">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="qbSubmitBtn" onclick="tcSubmitFullQuiz()">✅ Publish Complete Quiz</button>
+    </div>
+  `;
+  openModal('Create Quiz & Add Questions', html, 'modal-box-lg');
+  tcRenderDraftQuestions();
 }
 
+window.tcSubmitFullQuiz = async () => {
+  const title = document.getElementById('qbTitle').value.trim();
+  if(!title) { showToast('Quiz Title is required', 'error'); return; }
+  if(_draftQuestions.length === 0) { showToast('Please add at least one question', 'error'); return; }
+
+  const btn = document.getElementById('qbSubmitBtn');
+  btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:6px"></div> Saving...'; 
+  btn.disabled = true;
+
+  const fd = new FormData();
+  fd.append('title', title);
+  fd.append('due_date', document.getElementById('qbDue').value);
+  fd.append('time_limit', document.getElementById('qbTime').value || '0');
+  fd.append('max_attempts', document.getElementById('qbAttempts').value || '1'); // <-- Added this!
+  fd.append('description', document.getElementById('qbDesc').value);
+  if(document.getElementById('qbFile').files[0]) fd.append('file', document.getElementById('qbFile').files[0]);
+
+  try {
+    const res = await apiPost(`/api/courses/${_tcCourseId}/quizzes`, fd);
+    const quizId = res.id;
+    for(let q of _draftQuestions) {
+      await apiJSON(`/api/courses/${_tcCourseId}/quizzes/${quizId}/questions`, {
+        text: q.text, type: q.type, points: q.points, options: q.options
+      });
+    }
+    showToast('Quiz Published!', 'success');
+    closeModal(); tcLoadQuizzes();
+  } catch (e) {
+    showToast(e.message, 'error');
+    btn.innerHTML = '✅ Publish Complete Quiz'; btn.disabled = false;
+  }
+};
+
+// 2. Add a question to the draft
+window.tcAddDraftQuestion = (type) => {
+  const q = { id: Date.now(), type: type, text: '', points: 1, options: [] };
+  if (type === 'true_false') {
+    q.options = [{text: 'True', is_correct: true}, {text: 'False', is_correct: false}];
+  } else {
+    q.options = [
+      {text: '', is_correct: true}, {text: '', is_correct: false},
+      {text: '', is_correct: false}, {text: '', is_correct: false}
+    ];
+  }
+  _draftQuestions.push(q);
+  tcRenderDraftQuestions();
+  // Scroll to bottom
+  const list = document.getElementById('qbQuestionsList');
+  setTimeout(() => list.scrollTop = list.scrollHeight, 50);
+};
+
+// 3. Render the dynamic question list inside the modal
+window.tcRenderDraftQuestions = () => {
+  const list = document.getElementById('qbQuestionsList');
+  if (!list) return;
+  if (_draftQuestions.length === 0) { list.innerHTML = emptyState('📝', 'No questions yet. Click the buttons above to add questions.'); return; }
+
+  let html = '';
+  _draftQuestions.forEach((q, index) => {
+    html += `<div class="card mb-16" style="background:#f8fafc; border:1px solid #cbd5e1;"><div class="card-body" style="padding:16px;">
+      <div class="flex" style="justify-content:space-between; margin-bottom:12px;">
+        <strong style="color:var(--primary-dark)">Question ${index + 1} <span class="badge badge-gray">${q.type === 'true_false' ? 'True/False' : 'Multiple Choice'}</span></strong>
+        <button class="btn btn-danger btn-xs" onclick="tcRemoveDraftQuestion(${q.id})">✕ Remove</button>
+      </div>
+      <div class="form-row form-row-2">
+        <div class="form-group" style="flex:3; margin-bottom:12px"><label>Question Text</label>
+          <input type="text" class="form-control" value="${escHtml(q.text)}" onchange="tcUpdateDraftQ(${q.id}, 'text', this.value)" placeholder="Type the question here...">
+        </div>
+        <div class="form-group" style="flex:1; margin-bottom:12px"><label>Points</label>
+          <input type="number" class="form-control" value="${q.points}" onchange="tcUpdateDraftQ(${q.id}, 'points', this.value)">
+        </div>
+      </div>
+      <div><label class="text-sm bold text-muted">Answers (Select the radio button for the correct answer)</label></div>
+      <div style="margin-top:8px;">`;
+
+    q.options.forEach((opt, oIdx) => {
+      if (q.type === 'true_false') {
+        html += `<div style="margin-bottom:8px;"><label style="cursor:pointer; font-size:14px; display:flex; align-items:center; gap:8px;">
+          <input type="radio" name="correct_${q.id}" ${opt.is_correct ? 'checked' : ''} onchange="tcSetDraftCorrect(${q.id}, ${oIdx})"> ${opt.text}
+        </label></div>`;
+      } else {
+        html += `<div class="flex gap-8" style="margin-bottom:8px; align-items:center;">
+          <input type="radio" name="correct_${q.id}" ${opt.is_correct ? 'checked' : ''} onchange="tcSetDraftCorrect(${q.id}, ${oIdx})" style="transform:scale(1.2)">
+          <input type="text" class="form-control" style="padding:6px 10px" value="${escHtml(opt.text)}" placeholder="Option ${oIdx + 1}" onchange="tcUpdateDraftOpt(${q.id}, ${oIdx}, this.value)">
+        </div>`;
+      }
+    });
+    html += `</div></div></div>`;
+  });
+  list.innerHTML = html;
+};
+
+// Listeners to keep draft array updated
+window.tcUpdateDraftQ = (id, field, val) => { const q = _draftQuestions.find(x => x.id === id); if(q) q[field] = field==='points' ? parseInt(val)||0 : val; };
+window.tcUpdateDraftOpt = (qId, oIdx, val) => { const q = _draftQuestions.find(x => x.id === qId); if(q) q.options[oIdx].text = val; };
+window.tcSetDraftCorrect = (qId, correctIdx) => { const q = _draftQuestions.find(x => x.id === qId); if(q) q.options.forEach((o, i) => o.is_correct = (i === correctIdx)); };
+window.tcRemoveDraftQuestion = (id) => { _draftQuestions = _draftQuestions.filter(x => x.id !== id); tcRenderDraftQuestions(); };
+
+// 4. Submit everything to the backend
+window.tcSubmitFullQuiz = async () => {
+  const title = document.getElementById('qbTitle').value.trim();
+  if(!title) { showToast('Quiz Title is required', 'error'); return; }
+  if(_draftQuestions.length === 0) { showToast('Please add at least one question', 'error'); return; }
+
+  // Validation
+  for(let q of _draftQuestions) {
+    if(!q.text.trim()) { showToast('All questions must have text', 'error'); return; }
+    if(q.type === 'multiple_choice') {
+      for(let o of q.options) { if(!o.text.trim()) { showToast('All multiple choice options must be filled', 'error'); return; } }
+    }
+  }
+
+  const btn = document.getElementById('qbSubmitBtn');
+  btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:6px"></div> Connecting (May take 15s if server is sleeping)...'; 
+  btn.disabled = true;
+
+  const fd = new FormData();
+  fd.append('title', title);
+  fd.append('due_date', document.getElementById('qbDue').value);
+  fd.append('time_limit', document.getElementById('qbTime').value || '0');
+  fd.append('description', document.getElementById('qbDesc').value);
+  const fileInput = document.getElementById('qbFile');
+  if(fileInput.files[0]) fd.append('file', fileInput.files[0]);
+
+  try {
+    // A. Create the base quiz
+    const res = await apiPost(`/api/courses/${_tcCourseId}/quizzes`, fd);
+    const quizId = res.id;
+
+    // B. Save all the questions instantly
+    for(let q of _draftQuestions) {
+      await apiJSON(`/api/courses/${_tcCourseId}/quizzes/${quizId}/questions`, {
+        text: q.text, type: q.type, points: q.points, options: q.options
+      });
+    }
+
+    showToast('Quiz Published Successfully!', 'success');
+    closeModal(); tcLoadQuizzes();
+  } catch (e) {
+    showToast(e.message, 'error');
+    btn.innerHTML = '✅ Publish Complete Quiz'; btn.disabled = false;
+  }
+};
+
+// 5. Preview the Answer Key
+window.tcPreviewQuiz = async (quizId) => {
+  const questions = await api(`/api/courses/${_tcCourseId}/quizzes/${quizId}/questions`);
+  if(!questions.length) { showToast('No questions found.', 'info'); return; }
+
+  let html = `<div>`;
+  questions.forEach((q, i) => {
+    html += `<div class="card mb-16"><div class="card-body">
+      <p style="font-size:15px; margin-bottom:8px"><strong>${i+1}. ${escHtml(q.question_text)}</strong> <span class="text-muted text-sm">(${q.points} pts)</span></p>
+      <ul style="list-style:none; padding:0; margin:0;">`;
+    q.options.forEach(opt => {
+      // Teachers can see the answer key highlighted in green
+      const isCorrect = opt.is_correct || opt.is_correct === "true" || opt.is_correct === 1;
+      html += `<li style="padding:8px 12px; background:${isCorrect ? '#dcfce7' : '#f8fafc'}; border:1px solid ${isCorrect ? '#86efac' : '#e2e8f0'}; border-radius:6px; margin-bottom:6px; font-size:14px;">
+        ${isCorrect ? '✅' : '⚪'} ${escHtml(opt.option_text)}
+      </li>`;
+    });
+    html += `</ul></div></div>`;
+  });
+  html += `</div>`;
+  openModal('Quiz Preview & Answer Key', html, 'modal-box-lg');
+}
 // ---- Rubrics ----
 async function tcLoadRubrics() {
   const panel = document.getElementById('tc-rubrics');
@@ -717,17 +937,140 @@ async function tcLoadSyllabus() {
 async function tcEditSyllabus() {
   const syl = await api(`/api/courses/${_tcCourseId}/syllabus`);
   openModal('Edit Syllabus', modalForm([
-    { label: 'Content (HTML supported)', name: 'content', type: 'textarea', value: syl?.content || '',
-      placeholder: '<h3>Course Syllabus</h3><p>…</p>' },
+    { label: 'Content (HTML supported)', name: 'content', type: 'textarea', value: syl?.content || '' },
+    { label: 'Attach Syllabus File', name: 'file', type: 'file' } // Added File Input
   ], async (fd) => {
     try {
       await apiPost(`/api/courses/${_tcCourseId}/syllabus`, fd);
       closeModal(); showToast('Syllabus updated!', 'success'); tcLoadSyllabus();
     } catch (e) { showToast(e.message, 'error'); }
   }, 'Save Syllabus'));
-  // Make textarea taller
-  setTimeout(() => {
-    const ta = document.querySelector('#mf textarea');
-    if (ta) ta.style.minHeight = '260px';
-  }, 50);
+}
+
+// ---- Advanced Attendance System ----
+async function tcLoadAttendance() {
+  const panel = document.getElementById('tc-attendance');
+  panel.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
+  
+  // Fetch stats and course dates
+  const statsData = await api(`/api/courses/${_tcCourseId}/attendance/stats`);
+  const dates = statsData.dates || {};
+  const stats = statsData.stats || {};
+  
+  // Calculate percentages
+  const total = (stats.present || 0) + (stats.absent || 0) + (stats.late || 0);
+  const pPct = total ? Math.round(((stats.present || 0) / total) * 100) : 0;
+  const aPct = total ? Math.round(((stats.absent || 0) / total) * 100) : 0;
+  const lPct = total ? Math.round(((stats.late || 0) / total) * 100) : 0;
+
+  const today = new Date().toISOString().split('T')[0];
+  
+  let html = `
+    <div class="page-header page-header-row">
+      <div>
+        <h1 style="font-size:20px">📅 Course Attendance Dashboard</h1>
+        <p class="text-muted">Academic Term: ${fmtDate(dates.start_date) || 'Not set'} to ${fmtDate(dates.end_date) || 'Not set'}</p>
+      </div>
+    </div>
+    
+    <div class="att-dashboard">
+      <div class="att-stat-card"><div class="att-stat-value text-green">${pPct}%</div><div class="att-stat-label">Overall Present</div></div>
+      <div class="att-stat-card"><div class="att-stat-value text-red">${aPct}%</div><div class="att-stat-label">Overall Absent</div></div>
+      <div class="att-stat-card"><div class="att-stat-value text-yellow">${lPct}%</div><div class="att-stat-label">Overall Late</div></div>
+    </div>
+
+    <div class="card mb-24">
+      <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc;">
+        <div class="form-group" style="margin:0; width:220px;">
+          <label style="margin-bottom:4px">Record Attendance For:</label>
+          <input type="date" id="attDate" class="form-control" value="${today}" 
+                 min="${dates.start_date || ''}" max="${dates.end_date || ''}" 
+                 onchange="tcFetchAttendance()">
+        </div>
+        <div class="flex gap-8">
+          <button class="btn btn-secondary btn-sm" onclick="tcMarkAll('present')">✓ Mark All Present</button>
+          <button class="btn btn-secondary btn-sm" onclick="tcMarkAll('absent')">✕ Mark All Absent</button>
+        </div>
+      </div>
+      <div id="attList"><div class="loading-state"><div class="spinner"></div></div></div>
+    </div>
+  `;
+  panel.innerHTML = html;
+  tcFetchAttendance();
+}
+
+window.tcFetchAttendance = async () => {
+  const date = document.getElementById('attDate').value;
+  const students = await api(`/api/courses/${_tcCourseId}/attendance?date=${date}`);
+  
+  if (!students.length) {
+     document.getElementById('attList').innerHTML = emptyState('👥', 'No students enrolled in this course.');
+     return;
+  }
+
+  let html = `<div class="table-wrapper"><table style="width:100%"><thead><tr><th>Student Name</th><th style="width:250px;text-align:right">Status</th></tr></thead><tbody id="attBody">`;
+  
+  students.forEach(s => {
+    // Default to present if no record exists for the day
+    const status = s.status || 'present'; 
+    html += `<tr data-sid="${s.id}">
+      <td><strong>${escHtml(s.full_name)}</strong></td>
+      <td style="text-align:right">
+        <div class="att-btn-group" data-val="${status}">
+          <button class="att-btn present ${status === 'present' ? 'active' : ''}" onclick="tcSetStatus(this, 'present')">Present</button>
+          <button class="att-btn absent ${status === 'absent' ? 'active' : ''}" onclick="tcSetStatus(this, 'absent')">Absent</button>
+          <button class="att-btn late ${status === 'late' ? 'active' : ''}" onclick="tcSetStatus(this, 'late')">Late</button>
+        </div>
+      </td>
+    </tr>`;
+  });
+  
+  html += `</tbody></table></div>
+  <div style="padding:16px 20px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; background:#fafafa;">
+    <button class="btn btn-primary" onclick="tcSaveAttendance()">💾 Save Attendance</button>
+  </div>`;
+  document.getElementById('attList').innerHTML = html;
+}
+
+window.tcSetStatus = (btn, status) => {
+  const group = btn.parentElement;
+  // Remove active class from all buttons in this specific group
+  group.querySelectorAll('.att-btn').forEach(b => b.classList.remove('active'));
+  // Add active class to clicked button
+  btn.classList.add('active');
+  // Update the hidden data value
+  group.setAttribute('data-val', status);
+}
+
+window.tcMarkAll = (status) => {
+  document.querySelectorAll('.att-btn-group').forEach(group => {
+     group.querySelectorAll('.att-btn').forEach(b => b.classList.remove('active'));
+     group.querySelector(`.att-btn.${status}`).classList.add('active');
+     group.setAttribute('data-val', status);
+  });
+}
+
+window.tcSaveAttendance = async () => {
+  const date = document.getElementById('attDate').value;
+  const records = {};
+  
+  // Read values from our custom button groups instead of select dropdowns
+  document.querySelectorAll('#attBody tr').forEach(row => {
+    const sid = row.getAttribute('data-sid');
+    const status = row.querySelector('.att-btn-group').getAttribute('data-val');
+    records[sid] = status;
+  });
+  
+  try {
+    const originalBtn = document.querySelector('#attList .btn-primary');
+    originalBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:6px"></div> Saving...';
+    
+    await apiJSON(`/api/courses/${_tcCourseId}/attendance`, { date, records });
+    showToast('Attendance Saved Successfully!', 'success');
+    
+    // Reload the whole panel to update the charts
+    tcLoadAttendance(); 
+  } catch(e) {
+    showToast(e.message, 'error');
+  }
 }

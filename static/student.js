@@ -115,6 +115,8 @@ async function renderStudentCourse(courseId) {
     <nav class="course-nav">
       <button class="course-nav-btn active" onclick="scSwitchTab(this,'sc-modules')">📦 Modules</button>
       <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-assignments')">✏️ Assignments</button>
+      <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-materials')">📄 Materials</button>
+      <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-quizzes')">📝 Quizzes</button>
       <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-discussions')">💬 Discussions</button>
       <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-announcements')">📢 Announcements</button>
       <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-grades')">📊 Grades</button>
@@ -122,6 +124,8 @@ async function renderStudentCourse(courseId) {
     </nav>
     <div id="sc-modules" class="sc-panel"></div>
     <div id="sc-assignments" class="sc-panel" style="display:none"></div>
+    <div id="sc-materials" class="sc-panel" style="display:none"></div>
+    <div id="sc-quizzes" class="sc-panel" style="display:none"></div>
     <div id="sc-discussions" class="sc-panel" style="display:none"></div>
     <div id="sc-announcements" class="sc-panel" style="display:none"></div>
     <div id="sc-grades" class="sc-panel" style="display:none"></div>
@@ -138,6 +142,8 @@ function scSwitchTab(btn, id) {
   const loaders = {
     'sc-modules': scLoadModules,
     'sc-assignments': scLoadAssignments,
+    'sc-materials': scLoadMaterials,
+    'sc-quizzes': scLoadQuizzes,
     'sc-discussions': scLoadDiscussions,
     'sc-announcements': scLoadAnnouncements,
     'sc-grades': scLoadGrades,
@@ -216,7 +222,7 @@ async function scViewMaterial(materialId) {
   if (!m) return;
   openModal(m.title, `
     <div class="rich-content" style="white-space:pre-wrap">${escHtml(m.content || 'No content provided.')}</div>
-    ${m.file_name ? `<div class="alert alert-info mt-16">📎 Attached file: <strong>${escHtml(m.file_name)}</strong></div>` : ''}
+    ${m.file_name ? `<div class="alert alert-info mt-16">📎 Attached file: <a href="/uploads/${encodeURIComponent(m.file_name)}" target="_blank">${escHtml(m.file_name)}</a></div>` : ''}
   `);
 }
 
@@ -245,7 +251,6 @@ async function scLoadAssignments() {
   if (!panel) return;
   panel.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
   const assignments = await api(`/api/courses/${_scCourseId}/assignments`);
-
   if (!assignments.length) { panel.innerHTML = emptyState('✏️', 'No assignments yet.'); return; }
 
   panel.innerHTML = assignments.map(a => {
@@ -276,89 +281,213 @@ async function scLoadAssignments() {
   }).join('');
 }
 
+// ---- Materials ----
+async function scLoadMaterials() {
+  const panel = document.getElementById('sc-materials');
+  if (!panel) return;
+  panel.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
+  const materials = await api(`/api/courses/${_scCourseId}/materials`);
+  if (!materials.length) { panel.innerHTML = emptyState('📄', 'No materials available yet.'); return; }
+
+  panel.innerHTML = materials.map(m => `
+    <div class="card mb-16">
+      <div class="card-header">
+        <div class="card-title">📄 ${escHtml(m.title)}</div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:13.5px;color:var(--text-muted);margin-bottom:16px">${escHtml(m.content || '')}</p>
+        ${m.file_name ? `<p style="margin-bottom:16px"><strong>📎 Attached file:</strong> <a href="/uploads/${encodeURIComponent(m.file_name)}" target="_blank" class="link">Download/View File</a></p>` : ''}
+        <div class="text-xs text-muted">Added ${fmtDate(m.created_at)}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ---- Quizzes ----
+// ---- Load Quizzes with Attempt Locks ----
+async function scLoadQuizzes() {
+  const panel = document.getElementById('sc-quizzes');
+  if (!panel) return;
+  panel.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
+  const quizzes = await api(`/api/courses/${_scCourseId}/quizzes`);
+  if (!quizzes.length) { panel.innerHTML = emptyState('📝', 'No quizzes available yet.'); return; }
+
+  panel.innerHTML = quizzes.map(q => {
+    const sub = q.submission;
+    const attempts = sub ? sub.attempts : 0;
+    const maxAtt = parseInt(q.max_attempts) || 1;
+    const outOfTries = attempts >= maxAtt;
+    
+    let statusHtml = '';
+    if (sub) {
+        statusHtml = `<div class="mt-8 mb-12">
+          <span class="badge badge-green">Highest Grade: ${Math.round(sub.grade)}%</span> 
+          <span class="badge ${outOfTries ? 'badge-red' : 'badge-yellow'}">Attempts Used: ${attempts}/${maxAtt}</span>
+        </div>`;
+    }
+
+    return `
+    <div class="card mb-16">
+      <div class="card-header">
+        <div class="card-title">📝 ${escHtml(q.title)}</div>
+        <div class="text-sm text-muted mt-8">${fmtDate(q.due_date)}</div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:13.5px;color:var(--text-muted);margin-bottom:8px">${escHtml(q.description || '')}</p>
+        ${statusHtml}
+        <button class="btn ${outOfTries ? 'btn-secondary' : 'btn-primary'} btn-sm" ${outOfTries ? 'disabled' : `onclick="scOpenQuiz(${q.id})"`}>
+          ${outOfTries ? '🔒 Max Attempts Reached' : '📝 Take Quiz'}
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
 async function scOpenAssignment(assignmentId) {
-  const [assignments, rubrics, mySub] = await Promise.all([
+  const [assignments, mySub] = await Promise.all([
     api(`/api/courses/${_scCourseId}/assignments`),
-    api(`/api/courses/${_scCourseId}/rubrics`),
     api(`/api/courses/${_scCourseId}/assignments/${assignmentId}/submissions/my`).catch(() => null),
   ]);
   const a = assignments.find(x => x.id === assignmentId);
-  const rubric = rubrics.find(r => r.id === a?.rubric_id);
 
   let html = `
     <div class="alert alert-info mb-16">
-      <strong>${a?.points} points</strong> · Due: ${fmtDate(a?.due_date)}
+      <strong>Points: ${a.points}</strong> | Due: ${fmtDate(a.due_date)}
     </div>
-    <div class="rich-content mb-16">${escHtml(a?.description || '')}</div>`;
+    <p class="mb-16">${escHtml(a.description || 'No description provided.')}</p>
+  `;
 
-  // Show rubric if available
-  if (rubric) {
-    html += `<div class="card mb-16">
-      <div class="card-header"><span class="card-title">🏷️ Rubric: ${escHtml(rubric.title)}</span></div>
-      <div class="card-body" style="padding:0">
-        <table class="rubric-table"><thead><tr><th>Criteria</th><th style="text-align:center">Points</th></tr></thead>
-        <tbody>${(rubric.criteria||[]).map(c => `
-          <tr><td>${escHtml(c.description)}</td><td class="rubric-pts">${c.points}</td></tr>`).join('')}
-          <tr style="background:#f8fafc"><td><strong>Total</strong></td>
-            <td class="rubric-pts">${(rubric.criteria||[]).reduce((s,c)=>s+c.points,0)}</td></tr>
-        </tbody></table>
-      </div>
-    </div>`;
+  if (a.file_name) {
+    html += `<div class="alert alert-info mb-16">📎 Assignment file: <a href="/uploads/${encodeURIComponent(a.file_name)}" target="_blank">${escHtml(a.file_name)}</a></div>`;
   }
 
-  // Show grade/feedback if graded
-  if (mySub && mySub.grade !== null && mySub.grade !== undefined) {
-    const pct = Math.round(mySub.grade / a.points * 100);
-    const cls = gradeColor(pct);
-    html += `<div class="card mb-16" style="border-color:#86efac">
-      <div class="card-header" style="background:#f0fdf4">
-        <span class="card-title">📊 Your Grade</span>
-        <span class="grade-pill" style="font-size:16px">${mySub.grade}/${a.points} (${pct}%)</span>
-      </div>
-      ${mySub.feedback ? `<div class="card-body">
-        <div class="ann-meta">Teacher Feedback:</div>
-        <div style="font-size:14px;line-height:1.6;color:var(--text)">${escHtml(mySub.feedback)}</div>
-      </div>` : ''}
-    </div>`;
-  }
-
-  // Show previous submission
   if (mySub) {
-    html += `<div class="alert alert-warn mb-16">
-      ✅ Submitted on ${fmtDateTime(mySub.submitted_at)}
-      ${mySub.file_name ? `<br>📎 ${escHtml(mySub.file_name)}` : ''}
-    </div>`;
-    if (mySub.text_response) {
-      html += `<div class="card mb-16"><div class="card-header"><span class="card-title">Your Submission</span></div>
-        <div class="card-body"><pre style="white-space:pre-wrap;font-size:13px;font-family:inherit">${escHtml(mySub.text_response)}</pre></div></div>`;
-    }
+    html += `
+      <div class="alert alert-success mb-16">
+        ✅ Submitted on ${fmtDateTime(mySub.submitted_at)}
+        ${mySub.file_name ? `<br>📎 <a href="/uploads/${encodeURIComponent(mySub.file_name)}" target="_blank">View Uploaded Work</a>` : ''}
+      </div>
+    `;
   }
 
-  // Submission form
   html += `<div style="border-top:1px solid var(--border);padding-top:16px">
-    <h4 style="margin-bottom:12px">${mySub ? 'Update Submission' : 'Submit Your Work'}</h4>
-    <div class="form-group"><label>Your Response</label>
-      <textarea class="form-control" id="subText" style="min-height:120px" placeholder="Type your answer here…">${escHtml(mySub?.text_response || '')}</textarea>
-    </div>
-    <div class="form-group"><label>File Name (simulated upload)</label>
-      <input class="form-control" id="subFile" placeholder="e.g. my_assignment.pdf" value="${escHtml(mySub?.file_name || '')}">
-    </div>
-    <button class="btn btn-primary" onclick="scSubmitAssignment(${assignmentId})">📤 ${mySub ? 'Update' : 'Submit'}</button>
-  </div>`;
+      <h4 style="margin-bottom:12px">${mySub ? 'Update Submission' : 'Submit Your Work'}</h4>
+      <div class="form-group"><label>Your Response</label>
+        <textarea class="form-control" id="subText" style="min-height:120px" placeholder="Type your answer here…">${escHtml(mySub?.text_response || '')}</textarea>
+      </div>
+      <div class="form-group"><label>Upload File (PDF/Photo)</label>
+        <input class="form-control" type="file" id="subFileReal">
+      </div>
+      <button class="btn btn-primary" onclick="scSubmitAssignment(${assignmentId})">📤 ${mySub ? 'Update' : 'Submit'}</button>
+    </div>`;
 
   openModal(`${a?.title}`, html, 'modal-box-lg');
 }
 
+
 async function scSubmitAssignment(assignmentId) {
-  const text = document.getElementById('subText').value.trim();
-  const file = document.getElementById('subFile').value.trim();
-  if (!text && !file) { showToast('Please add a response or file name', 'error'); return; }
-  const fd = buildForm({ text_response: text, file_name: file });
+  const text = document.getElementById('subText').value;
+  const fileInput = document.getElementById('subFileReal');
+  
+  const fd = new FormData();
+  fd.append('text_response', text);
+  if (fileInput.files[0]) {
+    fd.append('file', fileInput.files[0]);
+  }
+
   try {
-    await apiPost(`/api/courses/${_scCourseId}/assignments/${assignmentId}/submissions`, fd);
-    showToast('Assignment submitted!', 'success');
-    closeModal();
-    scLoadAssignments();
+    const res = await fetch(`/api/courses/${_scCourseId}/assignments/${assignmentId}/submissions`, {
+        method: 'POST',
+        body: fd
+    });
+    if (res.ok) {
+        showToast('Assignment submitted successfully!', 'success');
+        closeModal();
+        scLoadAssignments();
+    } else {
+        showToast('Upload failed. Please try again.', 'error');
+    }
+  } catch (e) {
+    showToast('Connection error.', 'error');
+  }
+}
+
+// Variable to hold our countdown interval
+let _quizTimerInterval = null;
+
+async function scOpenQuiz(quizId) {
+  // Fetch quizzes to get the specific time limit
+  const quizzes = await api(`/api/courses/${_scCourseId}/quizzes`);
+  const quiz = quizzes.find(q => q.id === quizId);
+  const timeLimit = parseInt(quiz.time_limit) || 0;
+
+  const questions = await api(`/api/courses/${_scCourseId}/quizzes/${quizId}/questions`);
+  if (!questions.length) { showToast('Teacher has not added questions yet.', 'error'); return; }
+  
+  // Build header with sticky timer
+  let html = `
+    <div style="position:sticky; top:-22px; background:white; z-index:10; padding-bottom:16px; margin-bottom:16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+      <div>
+        <h3 style="margin:0">${escHtml(quiz.title)}</h3>
+        <p class="text-muted text-sm" style="margin:4px 0 0 0">${questions.length} Questions</p>
+      </div>
+      ${timeLimit > 0 ? `<div id="quizTimerDisplay" style="font-size:18px; font-weight:800; color:#dc2626; background:#fee2e2; padding:8px 16px; border-radius:8px; border:1px solid #fca5a5; font-family:monospace;">⏱️ ${timeLimit}:00</div>` : '<div class="badge badge-gray">No Time Limit</div>'}
+    </div>
+    <form id="quizForm">`;
+
+  // Build Questions
+  questions.forEach((q, i) => {
+    html += `<div class="card mb-16"><div class="card-body">
+      <p style="font-size:15px; margin-bottom:12px;"><strong>${i+1}. ${escHtml(q.question_text)}</strong> <span class="text-muted text-sm">(${q.points} pts)</span></p>`;
+    q.options.forEach(opt => {
+      html += `<label style="display:block; margin-bottom:8px; cursor:pointer; padding:10px 14px; border:1px solid var(--border); border-radius:8px; transition:background 0.2s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+        <input type="radio" name="q_${q.id}" value="${opt.id}" style="margin-right:8px;"> ${escHtml(opt.option_text)}
+      </label>`;
+    });
+    html += `</div></div>`;
+  });
+  html += `<button type="button" class="btn btn-primary w-full" style="padding:14px; font-size:16px;" onclick="scSubmitQuiz(${quizId})">📤 Submit Answers</button></form>`;
+  
+  openModal('', html, 'modal-box-lg');
+
+  // Logic to handle the countdown timer
+  if (_quizTimerInterval) clearInterval(_quizTimerInterval);
+  if (timeLimit > 0) {
+    let timeLeft = timeLimit * 60; // convert to seconds
+    const display = document.getElementById('quizTimerDisplay');
+    
+    _quizTimerInterval = setInterval(() => {
+      timeLeft--;
+      const m = Math.floor(timeLeft / 60).toString().padStart(2, '0');
+      const s = (timeLeft % 60).toString().padStart(2, '0');
+      if (display) display.innerHTML = `⏱️ ${m}:${s}`;
+
+      // Auto-Submit when time is up
+      if (timeLeft <= 0) {
+        clearInterval(_quizTimerInterval);
+        display.innerHTML = `⏱️ 00:00`;
+        showToast('Time is up! Auto-submitting quiz...', 'error');
+        scSubmitQuiz(quizId); // Forces the submit function
+      }
+    }, 1000);
+  }
+}
+
+window.scSubmitQuiz = async (quizId) => {
+  // Stop the timer immediately when they submit
+  if (_quizTimerInterval) clearInterval(_quizTimerInterval); 
+  
+  const form = document.getElementById('quizForm');
+  const answers = {};
+  new FormData(form).forEach((val, key) => { answers[key.split('_')[1]] = parseInt(val); });
+  
+  try {
+    const btn = document.querySelector('#quizForm .btn-primary');
+    if (btn) { btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;margin-right:8px;"></div> Grading...'; btn.disabled = true; }
+
+    const res = await apiJSON(`/api/courses/${_scCourseId}/quizzes/${quizId}/submit`, { answers });
+    showToast(`Quiz graded! Score: ${res.earned}/${res.total}`, 'success');
+    closeModal(); scLoadQuizzes(); scLoadGrades();
   } catch (e) { showToast(e.message, 'error'); }
 }
 
@@ -382,6 +511,7 @@ async function scLoadDiscussions() {
       </div>
       <div class="card-body">
         <p style="font-size:13.5px;color:var(--text-muted)">${escHtml(d.prompt || '')}</p>
+        ${d.file_name ? `<p style="margin-top:8px"><strong>📎 Attached file:</strong> <a href="/uploads/${encodeURIComponent(d.file_name)}" target="_blank" class="link">Download/View File</a></p>` : ''}
       </div>
     </div>`).join('');
 }
@@ -477,83 +607,68 @@ async function scLoadAnnouncements() {
         <div class="ann-title">📢 ${escHtml(a.title)}</div>
         <div class="ann-meta">By ${escHtml(a.author_name)} · ${fmtDateTime(a.created_at)}</div>
         <div class="ann-body">${escHtml(a.body || '')}</div>
+        ${a.file_name ? `<div style="margin-top:8px"><strong>📎 Attachment:</strong> <a href="/uploads/${encodeURIComponent(a.file_name)}" target="_blank" class="link">${escHtml(a.file_name)}</a></div>` : ''}
       </div>`).join('')}
   </div>`;
 }
 
 // ---- Grades ----
+// ---- Unified Gradebook (Shows both Assignments & Quizzes) ----
 async function scLoadGrades() {
   const panel = document.getElementById('sc-grades');
   if (!panel) return;
   panel.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
-  const assignments = await api(`/api/courses/${_scCourseId}/assignments`);
+  
+  // Fetch both assignments and our newly functioning quizzes!
+  const [assignments, quizzes] = await Promise.all([
+    api(`/api/courses/${_scCourseId}/assignments`),
+    api(`/api/courses/${_scCourseId}/quizzes`)
+  ]);
 
-  const graded   = assignments.filter(a => a.submission && a.submission.grade !== null);
-  const ungraded = assignments.filter(a => a.submission && a.submission.grade === null);
-  const pending  = assignments.filter(a => !a.submission);
+  const gradedAssigns = assignments.filter(a => a.submission && a.submission.grade !== null);
+  const gradedQuizzes = quizzes.filter(q => q.submission && q.submission.grade !== null);
+  const totalGradedCount = gradedAssigns.length + gradedQuizzes.length;
 
   let totalPct = null;
-  if (graded.length) {
-    const sum = graded.reduce((s, a) => s + (a.submission.grade / a.points * 100), 0);
-    totalPct = Math.round(sum / graded.length);
+  if (totalGradedCount > 0) {
+    let sum = 0;
+    gradedAssigns.forEach(a => sum += (a.submission.grade / a.points * 100));
+    gradedQuizzes.forEach(q => sum += q.submission.grade); // Quizzes are already in %
+    totalPct = Math.round(sum / totalGradedCount);
   }
 
   let html = '';
-
   if (totalPct !== null) {
     const cls = gradeColor(totalPct);
     html += `<div class="card mb-24" style="text-align:center;padding:28px">
       <div style="font-size:13px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px">Current Average</div>
       <div class="total-pct ${cls}" style="font-size:48px;margin:8px 0">${totalPct}%</div>
-      <div class="text-muted text-sm">Based on ${graded.length} graded assignment${graded.length!==1?'s':''}</div>
+      <div class="text-muted text-sm">Based on ${totalGradedCount} graded items</div>
     </div>`;
   }
 
-  function assignmentRow(a) {
+  html += `<div class="card"><div class="card-header"><span class="card-title">📊 Grades</span></div><div class="table-wrapper">
+    <table><thead><tr><th>Type</th><th>Item Name</th><th>Due</th><th>Points</th><th>Grade</th></tr></thead><tbody>`;
+  
+  // Render Assignments
+  assignments.forEach(a => {
     const sub = a.submission;
-    const rubricText = '';
-    if (!sub) {
-      return `<tr>
-        <td><strong>${escHtml(a.title)}</strong></td>
-        <td>${fmtDate(a.due_date)}</td>
-        <td>${a.points}</td>
-        <td><span class="badge badge-gray">Not submitted</span></td>
-        <td>—</td>
-      </tr>`;
-    }
-    if (sub.grade === null || sub.grade === undefined) {
-      return `<tr>
-        <td><strong>${escHtml(a.title)}</strong></td>
-        <td>${fmtDate(a.due_date)}</td>
-        <td>${a.points}</td>
-        <td><span class="badge badge-yellow">Awaiting grade</span></td>
-        <td>—</td>
-      </tr>`;
-    }
+    if (!sub) return html += `<tr><td><span class="badge badge-gray">Assignment</span></td><td><strong>${escHtml(a.title)}</strong></td><td>${fmtDate(a.due_date)}</td><td>${a.points}</td><td><span class="badge badge-gray">Not submitted</span></td></tr>`;
+    if (sub.grade === null) return html += `<tr><td><span class="badge badge-gray">Assignment</span></td><td><strong>${escHtml(a.title)}</strong></td><td>${fmtDate(a.due_date)}</td><td>${a.points}</td><td><span class="badge badge-yellow">Awaiting grade</span></td></tr>`;
     const pct = Math.round(sub.grade / a.points * 100);
-    const cls = gradeColor(pct);
-    return `<tr>
-      <td><strong>${escHtml(a.title)}</strong></td>
-      <td>${fmtDate(a.due_date)}</td>
-      <td>${a.points}</td>
-      <td><span class="badge badge-green">Graded</span></td>
-      <td><span class="${cls}" style="font-weight:700">${sub.grade}/${a.points} (${pct}%)</span>
-        ${sub.feedback ? `<div class="text-sm text-muted mt-8">💬 ${escHtml(sub.feedback.slice(0,60))}…</div>` : ''}
-      </td>
-    </tr>`;
-  }
+    html += `<tr><td><span class="badge badge-gray">Assignment</span></td><td><strong>${escHtml(a.title)}</strong></td><td>${fmtDate(a.due_date)}</td><td>${a.points}</td><td><span class="${gradeColor(pct)}" style="font-weight:700">${sub.grade}/${a.points} (${pct}%)</span></td></tr>`;
+  });
 
-  html += `<div class="card">
-    <div class="card-header"><span class="card-title">📊 All Assignments</span></div>
-    <div class="table-wrapper">
-      <table><thead><tr><th>Assignment</th><th>Due</th><th>Points</th><th>Status</th><th>Grade</th></tr></thead>
-      <tbody>${assignments.map(assignmentRow).join('')}</tbody></table>
-    </div>
-  </div>`;
+  // Render Quizzes
+  quizzes.forEach(q => {
+    const sub = q.submission;
+    if (!sub) return html += `<tr><td><span class="badge badge-blue">Quiz</span></td><td><strong>${escHtml(q.title)}</strong></td><td>${fmtDate(q.due_date)}</td><td>100</td><td><span class="badge badge-gray">Not taken</span></td></tr>`;
+    html += `<tr><td><span class="badge badge-blue">Quiz</span></td><td><strong>${escHtml(q.title)}</strong></td><td>${fmtDate(q.due_date)}</td><td>100</td><td><span class="${gradeColor(sub.grade)}" style="font-weight:700">${Math.round(sub.grade)}%</span></td></tr>`;
+  });
 
+  html += `</tbody></table></div></div>`;
   panel.innerHTML = html;
 }
-
 // ---- Syllabus ----
 async function scLoadSyllabus() {
   const panel = document.getElementById('sc-syllabus');

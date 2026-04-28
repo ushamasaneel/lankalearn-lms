@@ -979,3 +979,150 @@ tbody tr:hover { background: #f8fafc; }
 .page-content-view {
   max-width: 720px;
 }
+
+/* LankaLearn LMS - Perfected UI
+   Tailored for the Sri Lankan Market 
+*/
+
+:root {
+  --primary: #1e40af;       /* Deep Blue */
+  --sl-maroon: #800000;     /* Sri Lankan Maroon */
+  --sl-gold: #ffbe0b;       /* Sri Lankan Gold */
+  --sidebar-bg: #ffffff;
+  --header-bg: #1e3a8a;
+  --bg-light: #f8fafc;
+  --radius: 12px;
+}
+
+/* Persistent Top Bar with Gold Accent */
+.top-header {
+  background: var(--header-bg);
+  border-bottom: 4px solid var(--sl-gold);
+  height: 64px;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 1000;
+}
+
+.brand-text {
+  font-family: 'Playfair Display', serif;
+  color: white;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+/* Professional Sidebar */
+.sidebar {
+  width: 260px;
+  background: var(--sidebar-bg);
+  border-right: 1px solid #e2e8f0;
+  height: 100vh;
+  position: fixed;
+  top: 64px;
+  padding-top: 20px;
+}
+
+.sidebar-item {
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #475569;
+  font-weight: 500;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.sidebar-item:hover, .sidebar-item.active {
+  background: #eff6ff;
+  color: var(--primary);
+  border-right: 4px solid var(--primary);
+}
+
+/* Canvas-style Course Navigation */
+.course-nav {
+  background: white;
+  padding: 0 10px;
+  display: flex;
+  gap: 20px;
+  border-bottom: 2px solid #e2e8f0;
+  margin-bottom: 30px;
+  overflow-x: auto;
+}
+
+.course-nav-btn {
+  padding: 15px 5px;
+  border: none;
+  background: none;
+  font-weight: 600;
+  color: #64748b;
+  border-bottom: 3px solid transparent;
+  cursor: button;
+}
+
+.course-nav-btn.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+/* Improved Grade Badges for LK Standards */
+.grade-a { color: #16a34a; font-weight: bold; } /* Distinction */
+.grade-f { color: #dc2626; font-weight: bold; } /* Weak */
+
+/* Sign Out Button in Dropdown */
+.user-dropdown {
+  background: white;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+/* ---- Advanced Attendance UI ---- */
+.att-dashboard {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.att-stat-card {
+  background: white;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+}
+.att-stat-value { font-size: 32px; font-weight: 800; line-height: 1; margin-bottom: 4px; }
+.att-stat-label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.text-green { color: #16a34a; }
+.text-red { color: #dc2626; }
+.text-yellow { color: #d97706; }
+
+.att-btn-group {
+  display: inline-flex;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #f8fafc;
+}
+.att-btn {
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  transition: all 0.2s;
+  border-right: 1px solid var(--border);
+}
+.att-btn:last-child { border-right: none; }
+.att-btn:hover { background: #f1f5f9; color: var(--text); }
+.att-btn.present.active { background: #dcfce7; color: #15803d; box-shadow: inset 0 0 0 1px #86efac; }
+.att-btn.absent.active { background: #fee2e2; color: #b91c1c; box-shadow: inset 0 0 0 1px #fca5a5; }
+.att-btn.late.active { background: #fef9c3; color: #a16207; box-shadow: inset 0 0 0 1px #fde047; }
