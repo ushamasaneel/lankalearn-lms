@@ -392,6 +392,11 @@ def init_db():
         with db.cursor() as cur:
             # Add file_name columns to tables that need them
             tables_to_update = [
+                ('users', 'dob'),                # <-- ADD THIS
+                ('users', 'address'),            # <-- ADD THIS
+                ('users', 'notes'),              # <-- ADD THIS
+                ('users', 'profile_image'),      # <-- ADD THIS
+                ('users', 'phone'),
                 ('assignments', 'file_name'),
                 ('discussions', 'file_name'),
                 ('announcements', 'file_name'),
@@ -409,7 +414,7 @@ def init_db():
                 if cur.fetchone() is None:
                     cur.execute(f'ALTER TABLE {table} ADD COLUMN {column} TEXT')
             
-            # --- PASTE THE NEW TABLE CREATION HERE ---
+            # Create the quiz submissions table
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS quiz_submissions (
                     id SERIAL PRIMARY KEY,
@@ -421,7 +426,19 @@ def init_db():
                     UNIQUE(quiz_id, student_id)
                 )
             """)
-            # -----------------------------------------
+            
+            # --- THE FIX: Auto-sync all PostgreSQL sequences ---
+            tables_with_sequences = [
+                'users', 'courses', 'modules', 'materials', 'pages', 'assignments', 
+                'discussions', 'announcements', 'quizzes', 'rubrics', 'rubric_criteria', 
+                'module_items', 'submissions', 'discussion_posts', 'syllabus', 'quiz_submissions'
+            ]
+            for table in tables_with_sequences:
+                try:
+                    # Tells Postgres: "Look at the highest ID in this table, and set your counter to that number"
+                    cur.execute(f"SELECT setval('{table}_id_seq', (SELECT COALESCE(MAX(id), 0) FROM {table}))")
+                except:
+                    pass
 
     except Exception:
         pass
@@ -433,6 +450,7 @@ def init_db():
 
     seed(db)
     db.close()
+
 
 def seed(db):
     users = [
@@ -472,16 +490,8 @@ def seed(db):
     for cr in criteria:
         db.cursor().execute("INSERT INTO rubric_criteria(id,rubric_id,description,points) VALUES(%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING", cr)
 
-    modules = [
-        (1, 1, "Unit 1: Algebra",       "Equations, inequalities and polynomials", 1),
-        (2, 1, "Unit 2: Geometry",      "Circles, triangles and trigonometry",      2),
-        (3, 2, "Unit 1: Matter",        "States of matter and atomic structure",    1),
-        (4, 3, "Unit 1: Cell Biology",  "Cell structure and functions",             1),
-        (5, 4, "Unit 1: Fundamentals",  "Number systems, logic and algorithms",     1),
-        (6, 5, "Unit 1: Reading",       "Comprehension and vocabulary",             1),
-    ]
-    for m in modules:
-        db.cursor().execute("INSERT INTO modules(id,course_id,title,description,position) VALUES(%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING", m)
+    # No fake seeded modules - allow teachers to create their own
+    # modules = []
 
     materials = [
         (1,1,"Algebra Basics Notes",   "This chapter covers linear equations, quadratic equations and simultaneous equations...", "algebra_notes.pdf"),
@@ -545,14 +555,8 @@ def seed(db):
     for q in quizzes:
         db.cursor().execute("INSERT INTO quizzes(id,course_id,title,description,due_date) VALUES(%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING", q)
 
-    mitems = [
-        (1,1,"page",1,1), (2,1,"material",1,2), (3,1,"assignment",1,3), (4,1,"discussion",1,4), (5,1,"quiz",1,5),
-        (6,2,"material",2,1), (7,2,"assignment",2,2), (8,3,"material",3,1), (9,3,"assignment",3,2),
-        (10,4,"material",4,1), (11,4,"discussion",2,2), (12,4,"assignment",4,3),
-        (13,5,"page",2,1), (14,5,"material",5,2), (15,5,"quiz",3,3), (16,5,"assignment",5,4), (17,6,"assignment",5,1), 
-    ]
-    for mi in mitems:
-        db.cursor().execute("INSERT INTO module_items(id,module_id,type,item_id,position) VALUES(%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING", mi)
+    # No fake seeded module items - removed fake modules
+    # mitems = []
 
     submissions = [
         (1,1,4,"I solved problems 1-20. For Q1: x=3, Q2: x=5, x=2...","algebra_kasun.pdf", "2025-01-20 10:30:00", 85, "Good work Kasun!", "2025-01-21 14:00:00"),
@@ -668,27 +672,125 @@ def admin_stats(user=Depends(require_role("admin"))):
 
 @app.get("/api/admin/users")
 def list_users(user=Depends(require_role("admin"))):
-    return query("SELECT id,username,full_name,role,created_at FROM users ORDER BY role,full_name")
+    return query("SELECT id, username, full_name, role, created_at, dob, address, phone, notes, profile_image FROM users ORDER BY role, full_name")
 
 @app.post("/api/admin/users")
-def create_user(full_name: str = Form(...), username: str = Form(...),
-                password: str = Form(...), role: str = Form(...),
-                user=Depends(require_role("admin"))):
-    if role not in ("teacher","student"):
-        raise HTTPException(400, "Role must be teacher or student")
+async def create_user(
+    full_name: str = Form(...), username: str = Form(...), password: str = Form(...), 
+    role: str = Form(...), dob: str = Form(""), address: str = Form(""), 
+    phone: str = Form(""), notes: str = Form(""),
+    file: UploadFile = File(None), user=Depends(require_role("admin"))
+):
+    if role not in ("teacher", "student", "admin"):
+        raise HTTPException(400, "Invalid role")
+    
+    saved_filename = ""
     try:
-        uid = execute("INSERT INTO users(username,password_hash,full_name,role) VALUES(?,?,?,?)",
-                      (username, hash_pw(password), full_name, role))
+        if file and file.filename:
+            # ORGANIZED FOLDERS: uploads/profiles/teachers/Kasun_Perera/
+            folder_role = "teachers" if role == "teacher" else "students"
+            clean_folder_name = "".join(x for x in full_name if x.isalnum() or x == " ").replace(" ", "_")
+            profile_dir = UPLOAD_DIR / "profiles" / folder_role / clean_folder_name
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            clean_file_name = "".join(x for x in file.filename if x.isalnum() or x in "._- ")
+            saved_filename = f"profiles/{folder_role}/{clean_folder_name}/usr_{timestamp}_{clean_file_name}"
+            file_path = UPLOAD_DIR / saved_filename
+            
+            content_bytes = await file.read()
+            with file_path.open("wb") as buffer:
+                buffer.write(content_bytes)
+
+        uid = execute("""
+            INSERT INTO users(username, password_hash, full_name, role, dob, address, phone, notes, profile_image) 
+            VALUES(?,?,?,?,?,?,?,?,?)
+        """, (username, hash_pw(password), full_name, role, dob, address, phone, notes, saved_filename))
+        
         return {"id": uid, "message": "User created"}
     except IntegrityError:
         raise HTTPException(400, "Username already exists")
+    except Exception as e:
+        raise HTTPException(500, f"Failed to create user: {str(e)}")
+
+@app.put("/api/admin/users/{uid}")
+async def update_user(
+    uid: int, full_name: str = Form(...), username: str = Form(...), password: str = Form(""), 
+    dob: str = Form(""), address: str = Form(""), phone: str = Form(""), notes: str = Form(""),
+    file: UploadFile = File(None), user=Depends(require_role("admin"))
+):
+    target = query("SELECT role, profile_image, full_name FROM users WHERE id=?", (uid,), one=True)
+    if not target: raise HTTPException(404, "User not found")
+    
+    saved_filename = target["profile_image"]
+    
+    try:
+        if file and file.filename:
+            folder_role = "teachers" if target["role"] == "teacher" else "students"
+            clean_folder_name = "".join(x for x in full_name if x.isalnum() or x == " ").replace(" ", "_")
+            profile_dir = UPLOAD_DIR / "profiles" / folder_role / clean_folder_name
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            clean_file_name = "".join(x for x in file.filename if x.isalnum() or x in "._- ")
+            saved_filename = f"profiles/{folder_role}/{clean_folder_name}/usr_{timestamp}_{clean_file_name}"
+            file_path = UPLOAD_DIR / saved_filename
+            
+            content_bytes = await file.read()
+            with file_path.open("wb") as buffer:
+                buffer.write(content_bytes)
+
+        if password:
+            execute("""
+                UPDATE users SET full_name=?, username=?, password_hash=?, dob=?, address=?, phone=?, notes=?, profile_image=? WHERE id=?
+            """, (full_name, username, hash_pw(password), dob, address, phone, notes, saved_filename, uid))
+        else:
+            execute("""
+                UPDATE users SET full_name=?, username=?, dob=?, address=?, phone=?, notes=?, profile_image=? WHERE id=?
+            """, (full_name, username, dob, address, phone, notes, saved_filename, uid))
+            
+        return {"ok": True}
+    except IntegrityError:
+        raise HTTPException(400, "Username already exists")
+    except Exception as e:
+        raise HTTPException(500, f"Failed to update user: {str(e)}")
 
 @app.delete("/api/admin/users/{uid}")
 def delete_user(uid: int, user=Depends(require_role("admin"))):
     if uid == user["id"]:
         raise HTTPException(400, "Cannot delete yourself")
-    execute("DELETE FROM users WHERE id=?", (uid,))
+    
+    db = get_db()
+    try:
+        # We use a standard cursor here to avoid the "tuple indices" error
+        with db.cursor() as cur:
+            cur.execute("SELECT role FROM users WHERE id=%s", (uid,))
+            res = cur.fetchone()
+            if not res: return {"ok": True}
+            
+            user_role = res[0] # Fix: Access by index (0) instead of string "role"
+            
+            if user_role == "teacher":
+                cur.execute("UPDATE courses SET teacher_id=NULL WHERE teacher_id=%s", (uid,))
+                cur.execute("DELETE FROM announcements WHERE author_id=%s", (uid,))
+            elif user_role == "student":
+                cur.execute("DELETE FROM enrollments WHERE student_id=%s", (uid,))
+                cur.execute("DELETE FROM attendance WHERE student_id=%s", (uid,))
+                cur.execute("DELETE FROM quiz_answers WHERE student_id=%s", (uid,))
+                cur.execute("DELETE FROM quiz_submissions WHERE student_id=%s", (uid,))
+                cur.execute("DELETE FROM submissions WHERE student_id=%s", (uid,))
+                
+            cur.execute("DELETE FROM discussion_posts WHERE author_id=%s", (uid,))
+            cur.execute("DELETE FROM users WHERE id=%s", (uid,))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Failed to delete user: {str(e)}")
+    finally:
+        db.close()
+        
     return {"ok": True}
+
 
 @app.get("/api/admin/courses")
 def admin_list_courses(user=Depends(require_role("admin"))):
@@ -710,9 +812,67 @@ def create_course(code: str = Form(...), name: str = Form(...),
     except IntegrityError:
         raise HTTPException(400, "Course code already exists")
 
+@app.put("/api/admin/courses/{cid}")
+def update_course(cid: int, code: str = Form(...), name: str = Form(...),
+                  description: str = Form(""), teacher_id: int = Form(...),
+                  start_date: str = Form(""), end_date: str = Form(""),
+                  user=Depends(require_role("admin"))):
+    try:
+        execute("UPDATE courses SET code=?, name=?, description=?, teacher_id=?, start_date=?, end_date=? WHERE id=?",
+                (code, name, description, teacher_id, start_date, end_date, cid))
+        return {"ok": True}
+    except IntegrityError:
+        raise HTTPException(400, "Course code already exists")
+
 @app.delete("/api/admin/courses/{cid}")
 def delete_course(cid: int, user=Depends(require_role("admin"))):
-    execute("DELETE FROM courses WHERE id=?", (cid,))
+    # We must manually clear all dependent data first to satisfy Database Foreign Key constraints
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            # 1. Enrollments & Attendance & Syllabus
+            cur.execute("DELETE FROM enrollments WHERE course_id=%s", (cid,))
+            cur.execute("DELETE FROM attendance WHERE course_id=%s", (cid,))
+            cur.execute("DELETE FROM syllabus WHERE course_id=%s", (cid,))
+            
+            # 2. Modules
+            cur.execute("DELETE FROM module_items WHERE module_id IN (SELECT id FROM modules WHERE course_id=%s)", (cid,))
+            cur.execute("DELETE FROM modules WHERE course_id=%s", (cid,))
+            
+            # 3. Quizzes
+            cur.execute("DELETE FROM quiz_answers WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=%s)", (cid,))
+            cur.execute("DELETE FROM quiz_submissions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=%s)", (cid,))
+            cur.execute("DELETE FROM quiz_options WHERE question_id IN (SELECT id FROM quiz_questions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=%s))", (cid,))
+            cur.execute("DELETE FROM quiz_questions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=%s)", (cid,))
+            cur.execute("DELETE FROM quizzes WHERE course_id=%s", (cid,))
+            
+            # 4. Assignments
+            cur.execute("DELETE FROM submissions WHERE assignment_id IN (SELECT id FROM assignments WHERE course_id=%s)", (cid,))
+            cur.execute("DELETE FROM assignments WHERE course_id=%s", (cid,))
+            
+            # 5. Discussions
+            cur.execute("DELETE FROM discussion_posts WHERE discussion_id IN (SELECT id FROM discussions WHERE course_id=%s)", (cid,))
+            cur.execute("DELETE FROM discussions WHERE course_id=%s", (cid,))
+            
+            # 6. Rubrics
+            cur.execute("DELETE FROM rubric_criteria WHERE rubric_id IN (SELECT id FROM rubrics WHERE course_id=%s)", (cid,))
+            cur.execute("DELETE FROM rubrics WHERE course_id=%s", (cid,))
+            
+            # 7. Basic Items
+            cur.execute("DELETE FROM materials WHERE course_id=%s", (cid,))
+            cur.execute("DELETE FROM pages WHERE course_id=%s", (cid,))
+            cur.execute("DELETE FROM announcements WHERE course_id=%s", (cid,))
+            
+            # 8. Finally, safely delete the course itself
+            cur.execute("DELETE FROM courses WHERE id=%s", (cid,))
+            
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Failed to delete course: {str(e)}")
+    finally:
+        db.close()
+        
     return {"ok": True}
 
 @app.get("/api/admin/courses/{cid}/students")
@@ -757,6 +917,25 @@ def teacher_courses(user=Depends(require_role("teacher"))):
         FROM courses c WHERE c.teacher_id=? ORDER BY c.code
     """, (user["id"],))
 
+
+
+# ---------------------------------------------------------------------------
+# ENROLLED STUDENTS
+# ---------------------------------------------------------------------------
+
+@app.get("/api/courses/{cid}/enrolled-students")
+def get_enrolled_students(cid: int, user=Depends(require_role("teacher"))):
+    check_course_access(cid, user)
+    # Fetches student details from the users table via the enrollments table
+    return query("""
+        SELECT u.id, u.full_name, u.username, u.phone, u.profile_image 
+        FROM users u
+        JOIN enrollments e ON e.student_id = u.id
+        WHERE e.course_id = ?
+        ORDER BY u.full_name
+    """, (cid,))
+
+
 # ---------------------------------------------------------------------------
 # Shared course details (teacher + student)
 # ---------------------------------------------------------------------------
@@ -781,27 +960,33 @@ def get_course(cid: int, user=Depends(require_user)):
 @app.get("/api/courses/{cid}/modules")
 def get_modules(cid: int, user=Depends(require_user)):
     check_course_access(cid, user)
-    mods = query("SELECT * FROM modules WHERE course_id=? ORDER BY position,id", (cid,))
-    for mod in mods:
-        items = query("SELECT * FROM module_items WHERE module_id=? ORDER BY position,id", (mod["id"],))
-        for item in items:
-            t = item["type"]
-            iid = item["item_id"]
-            if t == "material":
-                r = query("SELECT title FROM materials WHERE id=?", (iid,), one=True)
-            elif t == "assignment":
-                r = query("SELECT title,due_date,points FROM assignments WHERE id=?", (iid,), one=True)
-            elif t == "discussion":
-                r = query("SELECT title,due_date FROM discussions WHERE id=?", (iid,), one=True)
-            elif t == "page":
-                r = query("SELECT title FROM pages WHERE id=?", (iid,), one=True)
-            elif t == "quiz":
-                r = query("SELECT title,due_date FROM quizzes WHERE id=?", (iid,), one=True)
-            else:
+    
+    db = get_db()
+    try:
+        # FIX: Reverted to SELECT * (Removed the file_name request)
+        mods = query("SELECT * FROM modules WHERE course_id=? ORDER BY position,id", (cid,), db=db)
+        for mod in mods:
+            items = query("SELECT * FROM module_items WHERE module_id=? ORDER BY position,id", (mod["id"],), db=db)
+            for item in items:
+                t = item["type"]
+                iid = item["item_id"]
                 r = None
-            item["meta"] = r or {}
-        mod["items"] = items
-    return mods
+                if t == "material":
+                    r = query("SELECT title FROM materials WHERE id=?", (iid,), one=True, db=db)
+                elif t == "assignment":
+                    r = query("SELECT title,due_date,points FROM assignments WHERE id=?", (iid,), one=True, db=db)
+                elif t == "discussion":
+                    r = query("SELECT title,due_date FROM discussions WHERE id=?", (iid,), one=True, db=db)
+                elif t == "page":
+                    r = query("SELECT title FROM pages WHERE id=?", (iid,), one=True, db=db)
+                elif t == "quiz":
+                    r = query("SELECT title,due_date FROM quizzes WHERE id=?", (iid,), one=True, db=db)
+                
+                item["meta"] = r or {}
+            mod["items"] = items
+        return mods
+    finally:
+        db.close()
 
 @app.get("/api/courses/{cid}/announcements")
 def get_announcements(cid: int, user=Depends(require_user)):
@@ -817,10 +1002,12 @@ def get_assignments(cid: int, user=Depends(require_user)):
     check_course_access(cid, user)
     assigns = query("SELECT * FROM assignments WHERE course_id=? ORDER BY due_date", (cid,))
     if user["role"] == "student":
+        # Optimize: Get all submissions for this student at once instead of N+1
+        subs = query("SELECT assignment_id, grade, feedback, submitted_at, graded_at FROM submissions WHERE assignment_id IN (SELECT id FROM assignments WHERE course_id=?) AND student_id=?",
+                     (cid, user["id"]))
+        sub_map = {s["assignment_id"]: s for s in subs}
         for a in assigns:
-            sub = query("SELECT grade,feedback,submitted_at,graded_at FROM submissions WHERE assignment_id=? AND student_id=?",
-                        (a["id"], user["id"]), one=True)
-            a["submission"] = sub
+            a["submission"] = sub_map.get(a["id"])
     return assigns
 
 @app.get("/api/courses/{cid}/discussions")
@@ -844,10 +1031,12 @@ def get_quizzes(cid: int, user=Depends(require_user)):
     quizzes = query("SELECT * FROM quizzes WHERE course_id=? ORDER BY due_date", (cid,))
     # If student, attach their specific grade and attempt count!
     if user["role"] == "student":
+        # Optimize: Get all submissions at once instead of N+1
+        subs = query("SELECT quiz_id, grade, attempts, submitted_at FROM quiz_submissions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=?) AND student_id=?",
+                     (cid, user["id"]))
+        sub_map = {s["quiz_id"]: s for s in subs}
         for q in quizzes:
-            sub = query("SELECT grade, attempts, submitted_at FROM quiz_submissions WHERE quiz_id=? AND student_id=?", 
-                        (q["id"], user["id"]), one=True)
-            q["submission"] = sub
+            q["submission"] = sub_map.get(q["id"])
     return quizzes
 
 # Quiz questions and auto-grading
@@ -952,22 +1141,64 @@ def get_syllabus(cid: int, user=Depends(require_user)):
 def create_module(cid: int, title: str = Form(...), description: str = Form(""),
                   user=Depends(require_role("teacher"))):
     check_course_access(cid, user)
+    
+    # Find the current highest position so the new module goes at the bottom
     pos = (query("SELECT MAX(position) as m FROM modules WHERE course_id=?", (cid,), one=True) or {}).get("m") or 0
+    
+    # Insert without any file_name reference
     mid = execute("INSERT INTO modules(course_id,title,description,position) VALUES(?,?,?,?)",
                   (cid, title, description, pos+1))
+    
     return {"id": mid}
 
 @app.put("/api/courses/{cid}/modules/{mid}")
-def update_module(cid: int, mid: int, title: str = Form(...), description: str = Form(""),
+async def update_module(cid: int, mid: int, title: str = Form(...), description: str = Form(""),
+                  file: UploadFile = File(None),
                   user=Depends(require_role("teacher"))):
     check_course_access(cid, user)
-    execute("UPDATE modules SET title=?,description=? WHERE id=? AND course_id=?",
-            (title, description, mid, cid))
-    return {"ok": True}
+    saved_filename = None
+    
+    try:
+        # Get existing module to preserve old file if no new one uploaded
+        existing = query("SELECT file_name FROM modules WHERE id=? AND course_id=?", (mid, cid), one=True)
+        existing_file = existing["file_name"] if existing else None
+        
+        if file and file.filename:
+            course_dir = TEACHER_UPLOAD_DIR / f"course_{cid}"
+            course_dir.mkdir(exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            clean_name = "".join(x for x in file.filename if x.isalnum() or x in "._- ")
+            saved_filename = f"module_{cid}_{timestamp}_{clean_name}"
+            file_path = course_dir / saved_filename
+            
+            with file_path.open("wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            
+            # Delete old file if exists
+            if existing_file:
+                try:
+                    (TEACHER_UPLOAD_DIR / f"course_{cid}" / existing_file).unlink()
+                except:
+                    pass
+        
+        final_file = saved_filename if saved_filename else existing_file
+        execute("UPDATE modules SET title=?,description=?,file_name=? WHERE id=? AND course_id=?",
+                (title, description, final_file, mid, cid))
+        return {"ok": True}
+    except Exception as e:
+        if saved_filename:
+            try:
+                (TEACHER_UPLOAD_DIR / f"course_{cid}" / saved_filename).unlink()
+            except:
+                pass
+        raise HTTPException(500, f"Failed to update module: {str(e)}")
 
 @app.delete("/api/courses/{cid}/modules/{mid}")
 def delete_module(cid: int, mid: int, user=Depends(require_role("teacher"))):
     check_course_access(cid, user)
+    # Delete items inside the module first to prevent foreign key errors
+    execute("DELETE FROM module_items WHERE module_id=?", (mid,))
     execute("DELETE FROM modules WHERE id=? AND course_id=?", (mid, cid))
     return {"ok": True}
 
@@ -992,21 +1223,22 @@ async def create_material(cid: int, title: str = Form(...), content: str = Form(
                           user=Depends(require_role("teacher"))):
     check_course_access(cid, user)
     saved_filename = ""
-    
     try:
         if file and file.filename:
-            # Create organized directory structure for teacher uploads
-            course_dir = TEACHER_UPLOAD_DIR / f"course_{cid}"
-            course_dir.mkdir(exist_ok=True)
-            
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             clean_name = "".join(x for x in file.filename if x.isalnum() or x in "._- ")
-            saved_filename = f"materials/course_{cid}/material_{cid}_{timestamp}_{clean_name}"
-            file_path = course_dir / f"material_{cid}_{timestamp}_{clean_name}"
             
-            # Use shutil to avoid reading entire file into memory
+            # CRITICAL FIX: No slashes here! Saves directly as mat_courseID_time_name
+            saved_filename = f"mat_{cid}_{timestamp}_{clean_name}"
+            
+            # Saves to the root UPLOAD_DIR
+            file_path = UPLOAD_DIR / saved_filename
+            
+            # Securely writes the file
+            content_bytes = await file.read()
             with file_path.open("wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
+                buffer.write(content_bytes)
+                
         elif file_name:
             saved_filename = file_name.strip()
 
@@ -1014,12 +1246,9 @@ async def create_material(cid: int, title: str = Form(...), content: str = Form(
                       (cid, title, content, saved_filename))
         return {"id": mid}
     except Exception as e:
-        # Clean up file if it was created but DB insert failed
         if saved_filename:
-            try:
-                (TEACHER_UPLOAD_DIR / f"course_{cid}" / saved_filename.split("/")[-1]).unlink()
-            except:
-                pass
+            try: (UPLOAD_DIR / saved_filename).unlink()
+            except: pass
         raise HTTPException(500, f"Failed to create material: {str(e)}")
 
 @app.post("/api/courses/{cid}/pages")
@@ -1198,22 +1427,31 @@ async def create_quiz(cid: int, title: str = Form(...), description: str = Form(
 async def update_syllabus(cid: int, content: str = Form(""), file: UploadFile = File(None), user=Depends(require_role("teacher"))):
     check_course_access(cid, user)
     saved_filename = None
-    if file and file.filename:
-        course_dir = TEACHER_UPLOAD_DIR / f"course_{cid}"
-        course_dir.mkdir(exist_ok=True)
-        saved_filename = f"syllabus/course_{cid}/syl_{cid}_{file.filename}"
-        file_path = course_dir / f"syl_{cid}_{file.filename}"
-        with file_path.open("wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+    try:
+        if file and file.filename:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            clean_name = "".join(x for x in file.filename if x.isalnum() or x in "._- ")
+            saved_filename = f"syl_{cid}_{timestamp}_{clean_name}"
+            file_path = UPLOAD_DIR / saved_filename
+            
+            # FIX: Await file.read() ensures the file completely saves to disk
+            content_bytes = await file.read()
+            with file_path.open("wb") as buffer:
+                buffer.write(content_bytes)
 
-    existing = query("SELECT id FROM syllabus WHERE course_id=?", (cid,), one=True)
-    if existing:
-        execute("UPDATE syllabus SET content=?, file_name=COALESCE(?, file_name), updated_at=? WHERE course_id=?",
-                (content, saved_filename, now_str(), cid))
-    else:
-        execute("INSERT INTO syllabus(course_id,content,file_name) VALUES(?,?,?)", (cid, content, saved_filename))
-    return {"ok": True}
-
+        existing = query("SELECT id FROM syllabus WHERE course_id=?", (cid,), one=True)
+        if existing:
+            if saved_filename:
+                execute("UPDATE syllabus SET content=?, file_name=?, updated_at=? WHERE course_id=?",
+                        (content, saved_filename, now_str(), cid))
+            else:
+                execute("UPDATE syllabus SET content=?, updated_at=? WHERE course_id=?",
+                        (content, now_str(), cid))
+        else:
+            execute("INSERT INTO syllabus(course_id,content,file_name) VALUES(?,?,?)", (cid, content, saved_filename))
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, f"Failed to update syllabus: {str(e)}")
 # ---------------------------------------------------------------------------
 # Rubrics
 # ---------------------------------------------------------------------------
@@ -1304,28 +1542,56 @@ def regrade_submission(cid: int, aid: int, sid: int,
 @app.get("/api/courses/{cid}/gradebook")
 def gradebook(cid: int, user=Depends(require_role("teacher"))):
     check_course_access(cid, user)
-    students = query("""
-        SELECT u.id,u.full_name,u.username FROM users u
-        JOIN enrollments e ON e.student_id=u.id
-        WHERE e.course_id=? ORDER BY u.full_name
-    """, (cid,))
-    assignments = query("SELECT id,title,points FROM assignments WHERE course_id=? ORDER BY due_date", (cid,))
     
-    for s in students:
-        s["grades"] = {}
-        total_points = 0
-        earned_points = 0
+    db = get_db()
+    try:
+        students = query("""
+            SELECT u.id,u.full_name,u.username FROM users u
+            JOIN enrollments e ON e.student_id=u.id
+            WHERE e.course_id=? ORDER BY u.full_name
+        """, (cid,), db=db)
+        
+        # Fetch both Assignments AND Quizzes
+        assignments = query("SELECT id, title, points, 'assignment' as type FROM assignments WHERE course_id=? ORDER BY due_date", (cid,), db=db)
+        quizzes = query("SELECT id, title, 100 as points, 'quiz' as type FROM quizzes WHERE course_id=? ORDER BY due_date", (cid,), db=db)
+        
+        all_items = []
         for a in assignments:
-            sub = query("SELECT grade FROM submissions WHERE assignment_id=? AND student_id=?",
-                        (a["id"], s["id"]), one=True)
-            g = sub["grade"] if sub and sub["grade"] is not None else None
-            s["grades"][str(a["id"])] = g
-            total_points += a["points"]
-            if g is not None:
-                earned_points += (g / 100) * a["points"]
-        s["total_pct"] = round((earned_points / total_points * 100), 1) if total_points > 0 else None
-    return {"students": students, "assignments": assignments}
+            a['item_key'] = f"a_{a['id']}" # Unique ID so they don't clash
+            a['title'] = f"✏️ {a['title']}"
+            all_items.append(a)
+        for q in quizzes:
+            q['item_key'] = f"q_{q['id']}"
+            q['title'] = f"📝 {q['title']}"
+            all_items.append(q)
 
+        # Get all submissions for both
+        a_subs = query("SELECT assignment_id as id, student_id, grade FROM submissions WHERE assignment_id IN (SELECT id FROM assignments WHERE course_id=?)", (cid,), db=db)
+        q_subs = query("SELECT quiz_id as id, student_id, grade FROM quiz_submissions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=?)", (cid,), db=db)
+        
+        sub_map = {}
+        for s in a_subs: sub_map[(f"a_{s['id']}", s["student_id"])] = s["grade"]
+        for s in q_subs: sub_map[(f"q_{s['id']}", s["student_id"])] = s["grade"]
+        
+        for s in students:
+            s["grades"] = {}
+            total_points = 0
+            earned_points = 0
+            for item in all_items:
+                g = sub_map.get((item["item_key"], s["id"]))
+                # We trick the frontend into mapping these perfectly by overriding the ID
+                item["original_id"] = item["id"]
+                item["id"] = item["item_key"] 
+                s["grades"][item["id"]] = g
+                
+                total_points += item["points"]
+                if g is not None:
+                    earned_points += (g / 100) * item["points"]
+            s["total_pct"] = round((earned_points / total_points * 100), 1) if total_points > 0 else None
+            
+        return {"students": students, "assignments": all_items}
+    finally:
+        db.close()
 # ---------------------------------------------------------------------------
 # Discussions
 # ---------------------------------------------------------------------------
@@ -1397,22 +1663,43 @@ def student_courses(user=Depends(require_role("student"))):
 
 @app.get("/api/calendar")
 def calendar(user=Depends(require_user)):
+    # Get all events in one efficient query using UNION
     if user["role"] == "teacher":
-        cids = [r["id"] for r in query("SELECT id FROM courses WHERE teacher_id=?", (user["id"],))]
+        query_sql = """
+            SELECT a.id, a.title, a.due_date, 'assignment' as type, c.name as course_name, c.id as course_id
+            FROM assignments a JOIN courses c ON a.course_id=c.id
+            WHERE c.teacher_id=? AND a.due_date!=''
+            UNION ALL
+            SELECT q.id, q.title, q.due_date, 'quiz' as type, c.name as course_name, c.id as course_id
+            FROM quizzes q JOIN courses c ON q.course_id=c.id
+            WHERE c.teacher_id=? AND q.due_date!=''
+            UNION ALL
+            SELECT d.id, d.title, d.due_date, 'discussion' as type, c.name as course_name, c.id as course_id
+            FROM discussions d JOIN courses c ON d.course_id=c.id
+            WHERE c.teacher_id=? AND d.due_date!=''
+            ORDER BY due_date, type
+        """
+        events = query(query_sql, (user["id"], user["id"], user["id"]))
     else:
-        cids = [r["course_id"] for r in query("SELECT course_id FROM enrollments WHERE student_id=?", (user["id"],))]
-
-    events = []
-    for cid in cids:
-        course = query("SELECT name,code FROM courses WHERE id=?", (cid,), one=True)
-        for a in query("SELECT id,title,due_date,'assignment' as type FROM assignments WHERE course_id=? AND due_date!=''", (cid,)):
-            a["course_name"] = course["name"]; a["course_id"] = cid; events.append(a)
-        for q in query("SELECT id,title,due_date,'quiz' as type FROM quizzes WHERE course_id=? AND due_date!=''", (cid,)):
-            q["course_name"] = course["name"]; q["course_id"] = cid; events.append(q)
-        for d in query("SELECT id,title,due_date,'discussion' as type FROM discussions WHERE course_id=? AND due_date!=''", (cid,)):
-            d["course_name"] = course["name"]; d["course_id"] = cid; events.append(d)
-
-    events.sort(key=lambda x: x.get("due_date") or "")
+        query_sql = """
+            SELECT a.id, a.title, a.due_date, 'assignment' as type, c.name as course_name, c.id as course_id
+            FROM assignments a JOIN courses c ON a.course_id=c.id
+            JOIN enrollments e ON e.course_id=c.id
+            WHERE e.student_id=? AND a.due_date!=''
+            UNION ALL
+            SELECT q.id, q.title, q.due_date, 'quiz' as type, c.name as course_name, c.id as course_id
+            FROM quizzes q JOIN courses c ON q.course_id=c.id
+            JOIN enrollments e ON e.course_id=c.id
+            WHERE e.student_id=? AND q.due_date!=''
+            UNION ALL
+            SELECT d.id, d.title, d.due_date, 'discussion' as type, c.name as course_name, c.id as course_id
+            FROM discussions d JOIN courses c ON d.course_id=c.id
+            JOIN enrollments e ON e.course_id=c.id
+            WHERE e.student_id=? AND d.due_date!=''
+            ORDER BY due_date, type
+        """
+        events = query(query_sql, (user["id"], user["id"], user["id"]))
+    
     return events
 
 # ---------------------------------------------------------------------------
@@ -1480,6 +1767,25 @@ async def save_attendance(cid: int, request: Request, user=Depends(require_role(
         """, (cid, student_id, date, status))
     return {"ok": True}
 
+
+@app.get("/fix-db")
+def fix_database():
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            # Forcefully inject the missing columns into PostgreSQL
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS dob TEXT;")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS notes TEXT;")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image TEXT;")
+        db.commit()
+        return {"status": "Success! Database columns forcefully added. You can go back to the dashboard now."}
+    except Exception as e:
+        db.rollback()
+        return {"status": "Error", "details": str(e)}
+    finally:
+        db.close()
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))

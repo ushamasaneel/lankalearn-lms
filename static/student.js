@@ -96,7 +96,7 @@ async function loadStudentDashboard() {
 }
 
 // ============================================================
-// Student Course View
+// Course view (student)
 // ============================================================
 let _scCourseId = null;
 
@@ -104,33 +104,32 @@ async function renderStudentCourse(courseId) {
   _scCourseId = courseId;
   const course = await api(`/api/courses/${courseId}`);
 
-  setContent(`
+  const navHtml = `
     <div class="page-header page-header-row">
       <div>
         <span class="badge badge-blue mb-8">${escHtml(course.code)}</span>
         <h1 style="margin-top:6px">${escHtml(course.name)}</h1>
-        <p>${escHtml(course.description || '')}</p>
+        <p>${escHtml(course.description||'')}</p>
       </div>
     </div>
     <nav class="course-nav">
       <button class="course-nav-btn active" onclick="scSwitchTab(this,'sc-modules')">📦 Modules</button>
       <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-assignments')">✏️ Assignments</button>
-      <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-materials')">📄 Materials</button>
-      <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-quizzes')">📝 Quizzes</button>
       <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-discussions')">💬 Discussions</button>
       <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-announcements')">📢 Announcements</button>
       <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-grades')">📊 Grades</button>
+      <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-quizzes')">📝 Quizzes</button>
       <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-syllabus')">📋 Syllabus</button>
     </nav>
     <div id="sc-modules" class="sc-panel"></div>
     <div id="sc-assignments" class="sc-panel" style="display:none"></div>
-    <div id="sc-materials" class="sc-panel" style="display:none"></div>
-    <div id="sc-quizzes" class="sc-panel" style="display:none"></div>
     <div id="sc-discussions" class="sc-panel" style="display:none"></div>
     <div id="sc-announcements" class="sc-panel" style="display:none"></div>
     <div id="sc-grades" class="sc-panel" style="display:none"></div>
+    <div id="sc-quizzes" class="sc-panel" style="display:none"></div>
     <div id="sc-syllabus" class="sc-panel" style="display:none"></div>
-  `);
+  `;
+  setContent(navHtml);
   scLoadModules();
 }
 
@@ -142,12 +141,11 @@ function scSwitchTab(btn, id) {
   const loaders = {
     'sc-modules': scLoadModules,
     'sc-assignments': scLoadAssignments,
-    'sc-materials': scLoadMaterials,
-    'sc-quizzes': scLoadQuizzes,
     'sc-discussions': scLoadDiscussions,
     'sc-announcements': scLoadAnnouncements,
     'sc-grades': scLoadGrades,
-    'sc-syllabus': scLoadSyllabus,
+    'sc-quizzes': scLoadQuizzes,
+    'sc-syllabus': scLoadSyllabus
   };
   if (loaders[id]) loaders[id]();
 }
@@ -216,13 +214,27 @@ function scRenderModuleItem(item) {
 }
 
 // ---- View material ----
+// ---- View material ----
 async function scViewMaterial(materialId) {
   const materials = await api(`/api/courses/${_scCourseId}/materials`);
   const m = materials.find(x => x.id === materialId);
   if (!m) return;
+  
+  // Smart Image Renderer
+  let fileHtml = '';
+  if (m.file_name) {
+      const ext = m.file_name.split('.').pop().toLowerCase();
+      const url = `/uploads/${encodeURIComponent(m.file_name)}`;
+      if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) {
+          fileHtml = `<div style="margin-top:16px; text-align:center;"><img src="${url}" style="max-width:100%; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.1)"></div>`;
+      } else {
+          fileHtml = `<div class="alert alert-info mt-16">📎 <strong>Attached file:</strong> <a href="${url}" target="_blank">${escHtml(m.file_name)}</a></div>`;
+      }
+  }
+
   openModal(m.title, `
     <div class="rich-content" style="white-space:pre-wrap">${escHtml(m.content || 'No content provided.')}</div>
-    ${m.file_name ? `<div class="alert alert-info mt-16">📎 Attached file: <a href="/uploads/${encodeURIComponent(m.file_name)}" target="_blank">${escHtml(m.file_name)}</a></div>` : ''}
+    ${fileHtml}
   `);
 }
 
@@ -416,71 +428,124 @@ async function scSubmitAssignment(assignmentId) {
 let _quizTimerInterval = null;
 
 async function scOpenQuiz(quizId) {
-  // Fetch quizzes to get the specific time limit
+  // Add heavy blur to modal background
+  const overlay = document.getElementById('modalOverlay');
+  if (overlay) {
+      overlay.style.backdropFilter = 'blur(12px)';
+      overlay.style.webkitBackdropFilter = 'blur(12px)';
+      overlay.style.backgroundColor = 'rgba(0,0,0,0.6)';
+  }
+
+  // Fetch quizzes to get the specific time limit and attempt data
   const quizzes = await api(`/api/courses/${_scCourseId}/quizzes`);
   const quiz = quizzes.find(q => q.id === quizId);
   const timeLimit = parseInt(quiz.time_limit) || 0;
+  const maxAtt = parseInt(quiz.max_attempts) || 1;
+  const attempts = quiz.submission ? quiz.submission.attempts : 0;
 
+  if (attempts >= maxAtt) {
+      showToast('Maximum attempts reached.', 'error');
+      if(overlay) overlay.style.backdropFilter = '';
+      return;
+  }
+
+  // The Start Screen!
+  let introHtml = `
+    <div style="text-align:center; padding: 30px 10px;">
+        <div style="font-size:54px; margin-bottom:16px;">📝</div>
+        <h2 style="margin-bottom:8px; font-family:'Playfair Display', serif; color:var(--primary-dark)">${escHtml(quiz.title)}</h2>
+        <p class="text-muted" style="margin-bottom:32px; font-size:15px;">${escHtml(quiz.description || 'Read the questions carefully before submitting.')}</p>
+
+        <div style="display:flex; justify-content:center; gap:24px; margin-bottom:36px;">
+            <div style="background:#f8fafc; padding:20px; border-radius:12px; border:1px solid var(--border); min-width:140px; box-shadow:0 4px 6px rgba(0,0,0,0.05);">
+                <div style="font-size:28px; font-weight:700; color:var(--primary);">${timeLimit > 0 ? timeLimit + ' Min' : '∞'}</div>
+                <div style="font-size:12px; color:var(--text-muted); text-transform:uppercase; font-weight:700; margin-top:6px; letter-spacing:1px;">Time Limit</div>
+            </div>
+            <div style="background:#f8fafc; padding:20px; border-radius:12px; border:1px solid var(--border); min-width:140px; box-shadow:0 4px 6px rgba(0,0,0,0.05);">
+                <div style="font-size:28px; font-weight:700; color:var(--primary);">${attempts} / ${maxAtt}</div>
+                <div style="font-size:12px; color:var(--text-muted); text-transform:uppercase; font-weight:700; margin-top:6px; letter-spacing:1px;">Attempts</div>
+            </div>
+        </div>
+
+        <button class="btn btn-primary" style="font-size:16px; padding:12px 36px; border-radius:30px; box-shadow:0 4px 12px rgba(30,64,175,0.3);" onclick="scStartQuizTaking(${quizId}, ${timeLimit})">🚀 Start Quiz</button>
+    </div>
+  `;
+
+  // Restore background when modal closes
+  const oldClose = window.closeModal;
+  window.closeModal = function() {
+      if (overlay) {
+          overlay.style.backdropFilter = '';
+          overlay.style.webkitBackdropFilter = '';
+          overlay.style.backgroundColor = '';
+      }
+      if (_quizTimerInterval) clearInterval(_quizTimerInterval);
+      oldClose();
+      window.closeModal = oldClose; // Restore original function
+  };
+
+  openModal('', introHtml);
+}
+
+window.scStartQuizTaking = async (quizId, timeLimit) => {
   const questions = await api(`/api/courses/${_scCourseId}/quizzes/${quizId}/questions`);
   if (!questions.length) { showToast('Teacher has not added questions yet.', 'error'); return; }
-  
-  // Build header with sticky timer
+
+  const quizzes = await api(`/api/courses/${_scCourseId}/quizzes`);
+  const quiz = quizzes.find(q => q.id === quizId);
+
   let html = `
     <div style="position:sticky; top:-22px; background:white; z-index:10; padding-bottom:16px; margin-bottom:16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
       <div>
         <h3 style="margin:0">${escHtml(quiz.title)}</h3>
         <p class="text-muted text-sm" style="margin:4px 0 0 0">${questions.length} Questions</p>
       </div>
-      ${timeLimit > 0 ? `<div id="quizTimerDisplay" style="font-size:18px; font-weight:800; color:#dc2626; background:#fee2e2; padding:8px 16px; border-radius:8px; border:1px solid #fca5a5; font-family:monospace;">⏱️ ${timeLimit}:00</div>` : '<div class="badge badge-gray">No Time Limit</div>'}
+      ${timeLimit > 0 ? `<div id="quizTimerDisplay" style="font-size:18px; font-weight:800; color:#dc2626; background:#fee2e2; padding:8px 16px; border-radius:8px; border:1px solid #fca5a5; font-family:monospace; box-shadow:0 2px 4px rgba(220,38,38,0.2);">⏱️ ${timeLimit}:00</div>` : '<div class="badge badge-gray">No Time Limit</div>'}
     </div>
     <form id="quizForm">`;
 
-  // Build Questions
   questions.forEach((q, i) => {
     html += `<div class="card mb-16"><div class="card-body">
       <p style="font-size:15px; margin-bottom:12px;"><strong>${i+1}. ${escHtml(q.question_text)}</strong> <span class="text-muted text-sm">(${q.points} pts)</span></p>`;
     q.options.forEach(opt => {
-      html += `<label style="display:block; margin-bottom:8px; cursor:pointer; padding:10px 14px; border:1px solid var(--border); border-radius:8px; transition:background 0.2s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
-        <input type="radio" name="q_${q.id}" value="${opt.id}" style="margin-right:8px;"> ${escHtml(opt.option_text)}
+      html += `<label style="display:block; margin-bottom:8px; cursor:pointer; padding:10px 14px; border:1px solid var(--border); border-radius:8px; transition:all 0.2s;" onmouseover="this.style.background='#f8fafc'; this.style.borderColor='#cbd5e1';" onmouseout="this.style.background='transparent'; this.style.borderColor='var(--border)';">
+        <input type="radio" name="q_${q.id}" value="${opt.id}" style="margin-right:8px; transform:scale(1.1);"> <span style="font-size:14.5px;">${escHtml(opt.option_text)}</span>
       </label>`;
     });
     html += `</div></div>`;
   });
-  html += `<button type="button" class="btn btn-primary w-full" style="padding:14px; font-size:16px;" onclick="scSubmitQuiz(${quizId})">📤 Submit Answers</button></form>`;
-  
+  html += `<button type="button" class="btn btn-primary w-full" style="padding:14px; font-size:16px; font-weight:700; margin-top:8px;" onclick="scSubmitQuiz(${quizId})">📤 Submit Answers</button></form>`;
+
   openModal('', html, 'modal-box-lg');
 
-  // Logic to handle the countdown timer
   if (_quizTimerInterval) clearInterval(_quizTimerInterval);
   if (timeLimit > 0) {
-    let timeLeft = timeLimit * 60; // convert to seconds
+    let timeLeft = timeLimit * 60;
     const display = document.getElementById('quizTimerDisplay');
-    
+
     _quizTimerInterval = setInterval(() => {
       timeLeft--;
       const m = Math.floor(timeLeft / 60).toString().padStart(2, '0');
       const s = (timeLeft % 60).toString().padStart(2, '0');
       if (display) display.innerHTML = `⏱️ ${m}:${s}`;
 
-      // Auto-Submit when time is up
       if (timeLeft <= 0) {
         clearInterval(_quizTimerInterval);
-        display.innerHTML = `⏱️ 00:00`;
+        if(display) display.innerHTML = `⏱️ 00:00`;
         showToast('Time is up! Auto-submitting quiz...', 'error');
-        scSubmitQuiz(quizId); // Forces the submit function
+        scSubmitQuiz(quizId);
       }
     }, 1000);
   }
 }
 
 window.scSubmitQuiz = async (quizId) => {
-  // Stop the timer immediately when they submit
-  if (_quizTimerInterval) clearInterval(_quizTimerInterval); 
-  
+  if (_quizTimerInterval) clearInterval(_quizTimerInterval);
+
   const form = document.getElementById('quizForm');
   const answers = {};
   new FormData(form).forEach((val, key) => { answers[key.split('_')[1]] = parseInt(val); });
-  
+
   try {
     const btn = document.querySelector('#quizForm .btn-primary');
     if (btn) { btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;margin-right:8px;"></div> Grading...'; btn.disabled = true; }
@@ -488,9 +553,12 @@ window.scSubmitQuiz = async (quizId) => {
     const res = await apiJSON(`/api/courses/${_scCourseId}/quizzes/${quizId}/submit`, { answers });
     showToast(`Quiz graded! Score: ${res.earned}/${res.total}`, 'success');
     closeModal(); scLoadQuizzes(); scLoadGrades();
-  } catch (e) { showToast(e.message, 'error'); }
+  } catch (e) {
+      showToast(e.message, 'error');
+      const btn = document.querySelector('#quizForm .btn-primary');
+      if (btn) { btn.innerHTML = '📤 Submit Answers'; btn.disabled = false; }
+  }
 }
-
 // ---- Discussions ----
 async function scLoadDiscussions() {
   const panel = document.getElementById('sc-discussions');
@@ -670,6 +738,7 @@ async function scLoadGrades() {
   panel.innerHTML = html;
 }
 // ---- Syllabus ----
+// ---- Syllabus ----
 async function scLoadSyllabus() {
   const panel = document.getElementById('sc-syllabus');
   if (!panel) return;
@@ -677,10 +746,23 @@ async function scLoadSyllabus() {
   const syl = await api(`/api/courses/${_scCourseId}/syllabus`);
   const content = syl?.content || '';
 
+  // Smart Image Renderer
+  let fileHtml = '';
+  if (syl?.file_name) {
+      const ext = syl.file_name.split('.').pop().toLowerCase();
+      const url = `/uploads/${encodeURIComponent(syl.file_name)}`;
+      if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) {
+          fileHtml = `<div style="margin-top:20px"><img src="${url}" style="max-width:100%; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.1)"></div>`;
+      } else {
+          fileHtml = `<div class="alert alert-info mt-16">📎 <strong>Attached Syllabus:</strong> <a href="${url}" target="_blank">Download File</a></div>`;
+      }
+  }
+
   panel.innerHTML = `<div class="card">
     <div class="card-header"><span class="card-title">📋 Syllabus</span></div>
     <div class="card-body">
       <div class="syllabus-content">${content || '<p class="text-muted">Syllabus not yet published by the teacher.</p>'}</div>
+      ${fileHtml}
     </div>
   </div>`;
 }

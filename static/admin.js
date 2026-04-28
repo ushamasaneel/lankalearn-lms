@@ -90,27 +90,50 @@ async function loadAdminUsers() {
   setActiveSidebar('users');
   setContent('<div class="loading-state"><div class="spinner"></div></div>');
   const users = await api('/api/admin/users');
+  
+  // Cache for editing
+  window._adminUsers = users;
 
   const teachers = users.filter(u => u.role === 'teacher');
   const students = users.filter(u => u.role === 'student');
   const admins   = users.filter(u => u.role === 'admin');
 
-  function userTable(list) {
+  function userTable(list, roleLabel) {
     if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
-    return `<table><thead><tr><th>Full Name</th><th>Username</th><th>Role</th><th>Joined</th><th>Actions</th></tr></thead>
-    <tbody>${list.map(u => `<tr>
-      <td><strong>${escHtml(u.full_name)}</strong></td>
-      <td><code>${escHtml(u.username)}</code></td>
-      <td><span class="badge ${roleBadge(u.role)}">${u.role}</span></td>
-      <td>${fmtDate(u.created_at)}</td>
-      <td>${u.id !== currentUser.id ? `<button class="btn btn-danger btn-xs" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>` : '<span class="text-muted text-sm">You</span>'}</td>
-    </tr>`).join('')}</tbody></table>`;
+    return `<table><thead><tr><th>Profile</th><th>Details</th><th>Contact / Extra</th><th>Actions</th></tr></thead>
+    <tbody>${list.map(u => {
+      // FIX: Encode the path segments individually to preserve the slashes!
+      const imgUrl = u.profile_image ? `/uploads/${u.profile_image.split('/').map(encodeURIComponent).join('/')}` : '';
+      const imgHtml = imgUrl ? `<img src="${imgUrl}" style="width:40px; height:40px; border-radius:50%; object-fit:cover;">` : `<div class="user-avatar" style="width:40px;height:40px;font-size:16px;">${u.full_name.charAt(0)}</div>`;
+      
+      return `<tr>
+        <td style="width:60px; text-align:center;">${imgHtml}</td>
+        <td>
+            <strong>${escHtml(u.full_name)}</strong><br>
+            <code>${escHtml(u.username)}</code><br>
+            <span class="badge ${roleBadge(u.role)}" style="margin-top:4px">${u.role}</span>
+        </td>
+        <td>
+            <div class="text-sm">
+                ${u.phone ? `<strong>Phone:</strong> ${escHtml(u.phone)}<br>` : ''}
+                ${u.dob ? `<strong>DOB:</strong> ${escHtml(u.dob)}<br>` : ''}
+                ${u.address ? `<strong>Address:</strong> ${escHtml(u.address)}<br>` : ''}
+                ${u.notes ? `<strong>Notes:</strong> ${escHtml(u.notes)}` : ''}
+            </div>
+        </td>
+        <td>
+            ${u.id !== currentUser.id ? `
+                <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id}, '${roleLabel}')">Edit</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
+            ` : '<span class="text-muted text-sm">You</span>'}
+        </td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
   }
 
   setContent(`
     <div class="page-header page-header-row">
       <div><h1>👥 Users</h1><p>Manage teachers and students</p></div>
-      <button class="btn btn-primary" onclick="showCreateUser()">+ Create User</button>
     </div>
 
     <div class="tabs">
@@ -120,42 +143,71 @@ async function loadAdminUsers() {
     </div>
 
     <div id="tab-teachers" class="tab-panel active card">
-      <div class="card-body" style="padding:0">${userTable(teachers)}</div>
+      <div class="card-header" style="background:#fafafa; display:flex; justify-content:flex-end;">
+        <button class="btn btn-primary btn-sm" onclick="showCreateUser('teacher')">+ Create Teacher</button>
+      </div>
+      <div class="card-body" style="padding:0">${userTable(teachers, 'teacher')}</div>
     </div>
-    <div id="tab-students" class="tab-panel card">
-      <div class="card-body" style="padding:0">${userTable(students)}</div>
+    
+    <div id="tab-students" class="tab-panel card" style="display:none">
+      <div class="card-header" style="background:#fafafa; display:flex; justify-content:flex-end;">
+        <button class="btn btn-primary btn-sm" onclick="showCreateUser('student')">+ Create Student</button>
+      </div>
+      <div class="card-body" style="padding:0">${userTable(students, 'student')}</div>
     </div>
-    <div id="tab-admins" class="tab-panel card">
-      <div class="card-body" style="padding:0">${userTable(admins)}</div>
+    
+    <div id="tab-admins" class="tab-panel card" style="display:none">
+      <div class="card-body" style="padding:0">${userTable(admins, 'admin')}</div>
     </div>
   `);
 }
 
 function switchTab(btn, tabId) {
-  btn.closest('.tabs, .page-content, #contentArea')
-     .parentElement.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  btn.closest('.tabs').parentElement.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
   btn.classList.add('active');
-  document.getElementById(tabId).classList.add('active');
+  document.getElementById(tabId).style.display = 'block';
 }
 
-function showCreateUser() {
-  openModal('Create New User', modalForm([
+function showCreateUser(role) {
+  const roleTitle = role.charAt(0).toUpperCase() + role.slice(1);
+  openModal(`Create New ${roleTitle}`, modalForm([
+    { name: 'role', type: 'hidden', value: role },
     { label: 'Full Name', name: 'full_name', placeholder: 'e.g. Kasun Perera', required: true },
     { label: 'Username', name: 'username', placeholder: 'e.g. kasun.p', required: true },
     { label: 'Password', name: 'password', type: 'password', placeholder: '••••••••', required: true },
-    { label: 'Role', name: 'role', type: 'select', required: true, options: [
-      { value: 'teacher', label: 'Teacher' },
-      { value: 'student', label: 'Student' },
-    ]}
+    { label: 'Phone Number', name: 'phone', type: 'tel', placeholder: 'e.g. 077 123 4567' },
+    { label: 'Date of Birth', name: 'dob', type: 'date' },
+    { label: 'Address', name: 'address', type: 'textarea', placeholder: 'Street address...' },
+    { label: 'Additional Notes', name: 'notes', type: 'textarea', placeholder: 'Any extra information...' },
+    { label: 'Profile Image', name: 'file', type: 'file' }
   ], async (fd) => {
     try {
       await apiPost('/api/admin/users', fd);
-      closeModal();
-      showToast('User created successfully', 'success');
-      loadAdminUsers();
+      closeModal(); showToast(`${roleTitle} created successfully`, 'success'); loadAdminUsers();
     } catch (e) { showToast(e.message, 'error'); }
-  }, 'Create User'));
+  }, `Create ${roleTitle}`));
+}
+
+function showEditUser(id, roleLabel) {
+  const u = window._adminUsers.find(x => x.id === id);
+  const roleTitle = roleLabel.charAt(0).toUpperCase() + roleLabel.slice(1);
+  
+  openModal(`Edit ${roleTitle}: ${u.full_name}`, modalForm([
+    { label: 'Full Name', name: 'full_name', value: u.full_name, required: true },
+    { label: 'Username', name: 'username', value: u.username, required: true },
+    { label: 'New Password (Leave blank to keep current)', name: 'password', type: 'password', placeholder: '••••••••' },
+    { label: 'Phone Number', name: 'phone', type: 'tel', value: u.phone || '' },
+    { label: 'Date of Birth', name: 'dob', type: 'date', value: u.dob || '' },
+    { label: 'Address', name: 'address', type: 'textarea', value: u.address || '' },
+    { label: 'Additional Notes', name: 'notes', type: 'textarea', value: u.notes || '' },
+    { label: 'Update Profile Image', name: 'file', type: 'file' }
+  ], async (fd) => {
+    try {
+      await api(`/api/admin/users/${id}`, { method: 'PUT', body: fd });
+      closeModal(); showToast('User updated!', 'success'); loadAdminUsers();
+    } catch (e) { showToast(e.message, 'error'); }
+  }, 'Save Changes'));
 }
 
 async function deleteUser(id, name) {
@@ -178,6 +230,10 @@ async function loadAdminCourses() {
     api('/api/admin/teachers')
   ]);
 
+  // Store in memory so the Edit Modal can read the current data easily
+  window._adminCourses = courses;
+  window._adminTeachers = teachers;
+
   setContent(`
     <div class="page-header page-header-row">
       <div><h1>📚 Courses</h1><p>Create and manage all courses</p></div>
@@ -196,6 +252,7 @@ async function loadAdminCourses() {
               <div class="course-card-teacher">👨‍🏫 ${escHtml(c.teacher_name||'Unassigned')}</div>
               <div class="flex gap-8">
                 <button class="btn btn-secondary btn-sm" onclick="manageEnrollments(${c.id},'${escHtml(c.name)}')">Students</button>
+                <button class="btn btn-secondary btn-sm" onclick="showEditCourse(${c.id})">Edit</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteCourse(${c.id},'${escHtml(c.name)}')">Delete</button>
               </div>
             </div>
@@ -205,6 +262,28 @@ async function loadAdminCourses() {
       ${!courses.length ? `<div class="empty-state"><div class="empty-icon">📚</div><p>No courses yet. Create your first one!</p></div>` : ''}
     </div>
   `);
+}
+
+function showEditCourse(id) {
+  const c = window._adminCourses.find(x => x.id === id);
+  const teachers = window._adminTeachers || [];
+  openModal('Edit Course', modalForm([
+    { label: 'Course Code', name: 'code', value: c.code, required: true },
+    { label: 'Course Name', name: 'name', value: c.name, required: true },
+    { label: 'Description', name: 'description', type: 'textarea', value: c.description || '' },
+    { label: 'Start Date', name: 'start_date', type: 'date', value: c.start_date || '', required: true },
+    { label: 'End Date', name: 'end_date', type: 'date', value: c.end_date || '', required: true },
+    { label: 'Teacher', name: 'teacher_id', type: 'select', value: c.teacher_id, required: true,
+      options: teachers.map(t => ({ value: t.id, label: t.full_name })) },
+  ], async (fd) => {
+    try {
+      await api(`/api/admin/courses/${id}`, { method: 'PUT', body: fd });
+      closeModal();
+      showToast('Course updated!', 'success');
+      loadAdminCourses();
+    } catch (e) { showToast(e.message, 'error'); }
+  }, 'Save Changes'));
+
 
   // Store teachers for modal
   window._adminTeachers = teachers;

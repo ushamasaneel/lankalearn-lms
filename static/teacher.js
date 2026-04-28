@@ -71,48 +71,28 @@ async function renderTeacherCourse(courseId) {
       <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-discussions')">💬 Discussions</button>
       <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-announcements')">📢 Announcements</button>
       <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-gradebook')">📊 Gradebook</button>
-      <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-materials')">📄 Materials</button>
       <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-quizzes')">📝 Quizzes</button>
       <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-rubrics')">🏷️ Rubrics</button>
       <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-syllabus')">📋 Syllabus</button>
       <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-attendance')">📅 Attendance</button>
+      <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-students')">👥 Students</button>
     </nav>
+
     <div id="tc-modules" class="tc-panel"></div>
     <div id="tc-assignments" class="tc-panel" style="display:none"></div>
     <div id="tc-discussions" class="tc-panel" style="display:none"></div>
     <div id="tc-announcements" class="tc-panel" style="display:none"></div>
     <div id="tc-gradebook" class="tc-panel" style="display:none"></div>
-    <div id="tc-materials" class="tc-panel" style="display:none"></div>
     <div id="tc-quizzes" class="tc-panel" style="display:none"></div>
     <div id="tc-rubrics" class="tc-panel" style="display:none"></div>
     <div id="tc-syllabus" class="tc-panel" style="display:none"></div>
     <div id="tc-attendance" class="tc-panel" style="display:none"></div>
+    <div id="tc-students" class="tc-panel" style="display:none"></div>
   `;
   setContent(navHtml);
   tcLoadModules();
 }
 
-function tcSwitchTab(btn, id) {
-  document.querySelectorAll('.course-nav-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.tc-panel').forEach(p => p.style.display = 'none');
-  btn.classList.add('active');
-  document.getElementById(id).style.display = 'block';
-  const loaders = {
-    'tc-modules': tcLoadModules,
-    'tc-assignments': tcLoadAssignments,
-    'tc-discussions': tcLoadDiscussions,
-    'tc-announcements': tcLoadAnnouncements,
-    'tc-gradebook': tcLoadGradebook,
-    'tc-materials': tcLoadMaterials,
-    'tc-quizzes': tcLoadQuizzes,
-    'tc-rubrics': tcLoadRubrics,
-    'tc-syllabus': tcLoadSyllabus,
-    'tc-attendance': tcLoadAttendance,
-  };
-  if (loaders[id]) loaders[id]();
-}
-
-
 
 function tcSwitchTab(btn, id) {
   document.querySelectorAll('.course-nav-btn').forEach(b => b.classList.remove('active'));
@@ -130,6 +110,7 @@ function tcSwitchTab(btn, id) {
     'tc-rubrics': tcLoadRubrics,
     'tc-syllabus': tcLoadSyllabus,
     'tc-attendance': tcLoadAttendance,
+    'tc-students': tcLoadEnrolledStudents,
   };
   if (loaders[id]) loaders[id]();
 }
@@ -216,6 +197,7 @@ async function tcCreateModule() {
   openModal('Create Module', modalForm([
     { label: 'Title', name: 'title', placeholder: 'e.g. Unit 1: Algebra', required: true },
     { label: 'Description', name: 'description', type: 'textarea', placeholder: 'Brief description…' },
+    { label: 'Upload File (Optional)', name: 'file', type: 'file' },
   ], async (fd) => {
     try {
       await apiPost(`/api/courses/${_tcCourseId}/modules`, fd);
@@ -228,6 +210,7 @@ async function tcEditModule(id, title, desc) {
   openModal('Edit Module', modalForm([
     { label: 'Title', name: 'title', value: title, required: true },
     { label: 'Description', name: 'description', type: 'textarea', value: desc },
+    { label: 'Upload New File (Optional)', name: 'file', type: 'file' },
   ], async (fd) => {
     try {
       await api(`/api/courses/${_tcCourseId}/modules/${id}`, { method: 'PUT', body: fd });
@@ -244,25 +227,82 @@ async function tcDeleteModule(id) {
 
 async function tcAddModuleItem(modId) {
   const tc = window._tc || {};
-  const allItems = [
-    ...(tc.materials||[]).map(m => ({ type:'material', id:m.id, label:`📄 ${m.title}` })),
-    ...(tc.assignments||[]).map(a => ({ type:'assignment', id:a.id, label:`✏️ ${a.title}` })),
-    ...(tc.discussions||[]).map(d => ({ type:'discussion', id:d.id, label:`💬 ${d.title}` })),
-    ...(tc.pages||[]).map(p => ({ type:'page', id:p.id, label:`📃 ${p.title}` })),
-    ...(tc.quizzes||[]).map(q => ({ type:'quiz', id:q.id, label:`📝 ${q.title}` })),
-  ];
+  let html = `
+    <div class="tabs mb-16">
+      <button class="tab-btn active" onclick="switchModTab('upload')">📤 Upload New File</button>
+      <button class="tab-btn" onclick="switchModTab('existing')">🔗 Link Existing Activity</button>
+    </div>
+    
+    <div id="modTab-upload" style="display:block">
+      <form id="modUploadForm" onsubmit="return false">
+        <div class="form-group"><label>File Name / Title</label><input type="text" name="title" class="form-control" required></div>
+        <div class="form-group"><label>Description (Optional)</label><textarea name="content" class="form-control" style="min-height:60px"></textarea></div>
+        <div class="form-group"><label>File (Image, PDF, etc)</label><input type="file" name="file" class="form-control" required></div>
+        <div class="flex gap-8 mt-16" style="justify-content:flex-end">
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary" onclick="submitNewModuleFile(${modId})">Upload & Add</button>
+        </div>
+      </form>
+    </div>
 
-  openModal('Add Item to Module', modalForm([
-    { label: 'Content Item', name: 'item_select', type: 'select', required: true,
-      options: allItems.map(i => ({ value: `${i.type}|${i.id}`, label: i.label })) },
-  ], async (fd) => {
-    const val = fd.get('item_select').split('|');
-    const itemFd = buildForm({ type: val[0], item_id: val[1] });
+    <div id="modTab-existing" style="display:none">
+      <div class="form-group"><label>Select Activity</label>
+        <select id="modExistingSelect" class="form-control">
+          <optgroup label="Assignments">
+            ${(tc.assignments||[]).map(a => `<option value="assignment|${a.id}">✏️ ${escHtml(a.title)}</option>`).join('')}
+          </optgroup>
+          <optgroup label="Quizzes">
+            ${(tc.quizzes||[]).map(q => `<option value="quiz|${q.id}">📝 ${escHtml(q.title)}</option>`).join('')}
+          </optgroup>
+          <optgroup label="Discussions">
+            ${(tc.discussions||[]).map(d => `<option value="discussion|${d.id}">💬 ${escHtml(d.title)}</option>`).join('')}
+          </optgroup>
+        </select>
+      </div>
+      <div class="flex gap-8 mt-16" style="justify-content:flex-end">
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitExistingModuleItem(${modId})">Add to Module</button>
+      </div>
+    </div>
+  `;
+  
+  window.switchModTab = (tab) => {
+    document.querySelectorAll('#modalBody .tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('modTab-upload').style.display = 'none';
+    document.getElementById('modTab-existing').style.display = 'none';
+    event.target.classList.add('active');
+    document.getElementById('modTab-' + tab).style.display = 'block';
+  };
+
+  window.submitNewModuleFile = async (mId) => {
+    const form = document.getElementById('modUploadForm');
+    if(!form.checkValidity()) { form.reportValidity(); return; }
+    const fd = new FormData(form);
+    const btn = form.querySelector('.btn-primary');
+    btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:6px"></div> Uploading...'; 
+    btn.disabled = true;
     try {
-      await apiPost(`/api/courses/${_tcCourseId}/modules/${modId}/items`, itemFd);
-      closeModal(); showToast('Item added!', 'success'); tcLoadModules();
-    } catch (e) { showToast(e.message, 'error'); }
-  }, 'Add to Module'));
+      // Create the file in the backend
+      const res = await apiPost(`/api/courses/${_tcCourseId}/materials`, fd);
+      // Link it to the module folder
+      const linkFd = buildForm({ type: 'material', item_id: res.id });
+      await apiPost(`/api/courses/${_tcCourseId}/modules/${mId}/items`, linkFd);
+      closeModal(); showToast('File added to module!', 'success'); tcLoadModules();
+    } catch(e) { showToast(e.message, 'error'); btn.innerHTML='Upload & Add'; btn.disabled=false; }
+  };
+
+  window.submitExistingModuleItem = async (mId) => {
+    const val = document.getElementById('modExistingSelect').value;
+    if(!val) return;
+    const [type, item_id] = val.split('|');
+    const linkFd = buildForm({ type, item_id });
+    try {
+      await apiPost(`/api/courses/${_tcCourseId}/modules/${mId}/items`, linkFd);
+      closeModal(); showToast('Activity linked!', 'success'); tcLoadModules();
+    } catch(e) { showToast(e.message, 'error'); }
+  };
+
+  openModal('Add Item to Module', html);
 }
 
 async function tcDeleteModuleItem(modId, itemId) {
@@ -272,8 +312,39 @@ async function tcDeleteModuleItem(modId, itemId) {
 
 function tcViewItem(type, itemId) {
   if (type === 'assignment') tcViewAssignmentSubmissions(itemId);
+  if (type === 'material') tcViewMaterial(itemId);
+  if (type === 'page') tcViewPage(itemId);
 }
 
+async function tcViewMaterial(materialId) {
+  const materials = await api(`/api/courses/${_tcCourseId}/materials`);
+  const m = materials.find(x => x.id === materialId);
+  if (!m) return;
+  
+  // Smart Image Renderer
+  let fileHtml = '';
+  if (m.file_name) {
+      const ext = m.file_name.split('.').pop().toLowerCase();
+      const url = `/uploads/${encodeURIComponent(m.file_name)}`;
+      if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) {
+          fileHtml = `<div style="margin-top:16px; text-align:center;"><img src="${url}" style="max-width:100%; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.1)"></div>`;
+      } else {
+          fileHtml = `<div class="alert alert-info mt-16">📎 <strong>Attached file:</strong> <a href="${url}" target="_blank">${escHtml(m.file_name)}</a></div>`;
+      }
+  }
+
+  openModal(m.title, `
+    <div class="rich-content" style="white-space:pre-wrap">${escHtml(m.content || '')}</div>
+    ${fileHtml}
+  `);
+}
+
+async function tcViewPage(pageId) {
+  const pages = await api(`/api/courses/${_tcCourseId}/pages`);
+  const p = pages.find(x => x.id === pageId);
+  if (!p) return;
+  openModal(p.title, `<div class="rich-content">${p.body || ''}</div>`);
+}
 // ---- Assignments ----
 async function tcLoadAssignments() {
   const panel = document.getElementById('tc-assignments');
@@ -915,12 +986,25 @@ function tcCreateRubric() {
 }
 
 // ---- Syllabus ----
+// ---- Syllabus ----
 async function tcLoadSyllabus() {
   const panel = document.getElementById('tc-syllabus');
   if (!panel) return;
   panel.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
   const syl = await api(`/api/courses/${_tcCourseId}/syllabus`);
   const content = syl?.content || '';
+
+  // Smart Image Renderer
+  let fileHtml = '';
+  if (syl?.file_name) {
+      const ext = syl.file_name.split('.').pop().toLowerCase();
+      const url = `/uploads/${encodeURIComponent(syl.file_name)}`;
+      if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) {
+          fileHtml = `<div style="margin-top:20px"><img src="${url}" style="max-width:100%; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.1)"></div>`;
+      } else {
+          fileHtml = `<div class="alert alert-info mt-16">📎 <strong>Attached Syllabus:</strong> <a href="${url}" target="_blank">Download File</a></div>`;
+      }
+  }
 
   panel.innerHTML = `
     <div class="page-header page-header-row">
@@ -930,6 +1014,7 @@ async function tcLoadSyllabus() {
     <div class="card">
       <div class="card-body">
         <div class="syllabus-content">${content || '<p class="text-muted">No syllabus content yet. Click "Edit Syllabus" to add content.</p>'}</div>
+        ${fileHtml}
       </div>
     </div>`;
 }
@@ -1072,5 +1157,53 @@ window.tcSaveAttendance = async () => {
     tcLoadAttendance(); 
   } catch(e) {
     showToast(e.message, 'error');
+  }
+}
+
+async function tcLoadEnrolledStudents() {
+  const panel = document.getElementById('tc-students');
+  if (!panel) return;
+  panel.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
+
+  try {
+    const students = await api(`/api/courses/${_tcCourseId}/enrolled-students`);
+
+    if (!students.length) {
+      panel.innerHTML = emptyState('👥', 'No students enrolled in this course yet.');
+      return;
+    }
+
+    let html = `
+      <div class="page-header"><h1 style="font-size:20px">👥 Enrolled Students</h1></div>
+      <div class="card">
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Profile</th>
+                <th>Name</th>
+                <th>Username</th>
+                <th>Contact</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${students.map(s => {
+                const imgUrl = s.profile_image ? `/uploads/${s.profile_image.split('/').map(encodeURIComponent).join('/')}` : '';
+                const imgHtml = imgUrl ? `<img src="${imgUrl}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">` : `<div class="user-avatar" style="width:40px;height:40px;font-size:16px;">${s.full_name.charAt(0)}</div>`;
+                
+                return `<tr>
+                  <td style="width:60px;text-align:center;">${imgHtml}</td>
+                  <td><strong>${escHtml(s.full_name)}</strong></td>
+                  <td><code>${escHtml(s.username)}</code></td>
+                  <td>${s.phone ? `📞 ${escHtml(s.phone)}` : '<span class="text-muted">No phone</span>'}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+    panel.innerHTML = html;
+  } catch (e) {
+    showToast('Failed to load students', 'error');
   }
 }
