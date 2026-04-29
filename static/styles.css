@@ -96,17 +96,34 @@ body {
 .header-right { display: flex; align-items: center; gap: 16px; }
 
 .header-user {
+  position: relative; /* Ensure dropdown anchors here */
   display: flex;
   align-items: center;
   gap: 10px;
-  cursor: pointer;
-  position: relative;
-  padding: 6px 10px;
-  border-radius: 8px;
-  transition: background 0.15s;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 30px;
+  transition: all 0.2s;
 }
-.header-user:hover { background: rgba(255,255,255,0.1); }
-.header-user:hover .user-dropdown { display: block; }
+
+
+/* Remove the hover rule and replace with this */
+.header-user.active .user-dropdown {
+  display: block;
+  animation: slideDown 0.2s ease-out;
+}
+
+/* Add a smooth entry animation */
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Ensure the cursor changes to let users know it's clickable */
+.header-user {
+  cursor: pointer;
+  user-select: none;
+}
 
 .user-avatar {
   width: 34px; height: 34px;
@@ -135,24 +152,29 @@ body {
 .user-dropdown {
   display: none;
   position: absolute;
-  top: calc(100% + 4px);
+  top: 110%; /* Place it below the header */
   right: 0;
+  width: 160px;
   background: white;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.2);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: var(--shadow-md);
-  min-width: 140px;
   overflow: hidden;
-  z-index: 300;
+  z-index: 1001;
 }
 .dropdown-item {
-  padding: 10px 16px;
-  font-size: 13px;
-  color: var(--text);
-  cursor: pointer;
-  transition: background 0.15s;
+  padding: 12px 16px;
+  color: var(--danger);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.2s;
 }
-.dropdown-item:hover { background: #f8fafc; }
+
+.dropdown-item:hover {
+  background: #fff1f2;
+}
 
 /* ---- Layout ---- */
 .app-layout {
@@ -903,6 +925,9 @@ tbody tr:hover { background: #f8fafc; }
 .course-banner-3 { background: linear-gradient(to right, #7c3aed, #a78bfa); }
 .course-banner-4 { background: linear-gradient(to right, #b45309, #fbbf24); }
 .course-banner-5 { background: linear-gradient(to right, #be185d, #f472b6); }
+
+
+
 
 /* ---- Responsive ---- */
 @media (max-width: 900px) {

@@ -10,53 +10,42 @@
 </head>
 <body>
 
-<!-- Top Header -->
 <header class="top-header">
   <div class="header-left">
-    <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()">☰</button>
+    <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleMobileSidebar()">☰</button>
     <div class="brand">
       <span class="brand-icon-small">🎓</span>
       <span class="brand-text">LankaLearn</span>
     </div>
-    <!-- Breadcrumb / Page Title -->
     <div class="page-title-area">
-      <span id="pageTitle" class="page-title"></span>
+        <span class="page-title" id="pageTitle">Dashboard</span>
     </div>
   </div>
+  
   <div class="header-right">
-    <div class="header-user" id="headerUser">
+    <div class="header-user" onclick="this.classList.toggle('active')">
       <div class="user-avatar" id="userAvatar"></div>
       <div class="user-info">
-        <div class="user-name" id="userName">Loading…</div>
-        <div class="user-role" id="userRole"></div>
+        <div class="user-name" id="userName">User</div>
+        <div class="user-role" id="userRole" style="display:none">Role</div>
       </div>
-      <div class="user-dropdown" id="userDropdown">
+      <div class="user-dropdown">
         <div class="dropdown-item" onclick="logout()">🚪 Sign Out</div>
       </div>
     </div>
   </div>
 </header>
 
-<!-- Layout -->
 <div class="app-layout">
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleMobileSidebar()"></div>
 
-  <!-- Sidebar -->
   <nav class="sidebar" id="sidebar">
-    <div class="sidebar-section" id="sidebarNav">
-      <!-- Populated by JS based on role -->
-    </div>
+    <div class="sidebar-section" id="sidebarNav"></div>
   </nav>
 
-  <!-- Main Content -->
   <main class="main-content" id="mainContent">
-    <div id="contentArea">
-      <div class="loading-state">
-        <div class="spinner"></div>
-        <p>Loading…</p>
-      </div>
-    </div>
+    <div id="contentArea"></div>
   </main>
-
 </div>
 
 <!-- Global Modal -->

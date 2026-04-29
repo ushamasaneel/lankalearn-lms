@@ -194,4 +194,24 @@ async function loadCourseView(courseId, courseName) {
   } else {
     await renderStudentCourse(courseId);
   }
+} // <--- This closing brace was missing!
+
+function toggleMobileSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    
+    if (sidebar && overlay) { // Added safety check
+        sidebar.classList.toggle('mobile-open');
+        overlay.classList.toggle('active');
+    }
 }
+
+// Close sidebar automatically when a course or menu item is clicked on mobile
+document.addEventListener('click', function(e) {
+    const isMobile = window.innerWidth <= 900;
+    const isNavItem = e.target.closest('.sidebar-item') || e.target.closest('.sidebar-course-item');
+    
+    if (isMobile && isNavItem) {
+        toggleMobileSidebar();
+    }
+});

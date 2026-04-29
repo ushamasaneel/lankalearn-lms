@@ -77,7 +77,6 @@ async function renderTeacherCourse(courseId) {
       <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-attendance')">📅 Attendance</button>
       <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-students')">👥 Students</button>
     </nav>
-
     <div id="tc-modules" class="tc-panel"></div>
     <div id="tc-assignments" class="tc-panel" style="display:none"></div>
     <div id="tc-discussions" class="tc-panel" style="display:none"></div>
@@ -92,7 +91,6 @@ async function renderTeacherCourse(courseId) {
   setContent(navHtml);
   tcLoadModules();
 }
-
 
 function tcSwitchTab(btn, id) {
   document.querySelectorAll('.course-nav-btn').forEach(b => b.classList.remove('active'));
