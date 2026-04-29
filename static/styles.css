@@ -437,15 +437,58 @@ textarea.form-control {
 }
 select.form-control { cursor: pointer; }
 
-/* ---- Tables ---- */
+/* --- Fluid Table System --- */
 .table-wrapper {
-  overflow-x: auto;
+  width: 100%;
+  overflow-x: auto; /* Fallback scroll if content is truly massive */
+  -webkit-overflow-scrolling: touch;
   border-radius: var(--radius);
   border: 1px solid var(--border);
+  background: white;
 }
+
 table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: auto; /* Allows columns to adjust to content size */
+}
+
+
+@media (max-width: 480px) {
+  .stat-grid {
+    grid-template-columns: 1fr; /* Stacks stats in a single column on small phones */
+  }
+  
+  .card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+}
+/* --- Mobile Specific Table Scaling --- */
+@media (max-width: 768px) {
+  /* Reduce padding and font size so more columns fit in one view */
+  tbody td, thead th {
+    padding: 8px 4px !important;
+    font-size: 11px !important;
+  }
+
+  /* Specifically for the Gradebook: make the name column "sticky" 
+     so you can scroll the grades while still seeing who the student is */
+  .gradebook-table th:first-child, 
+  .gradebook-table td:first-child {
+    position: sticky;
+    left: 0;
+    background: white;
+    z-index: 10;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.05);
+    min-width: 80px;
+  }
+
+  /* Hide less important columns like 'Username' on mobile to save space */
+  .text-sm.text-muted {
+    display: none;
+  }
 }
 thead th {
   background: #f8fafc;
@@ -968,22 +1011,59 @@ tbody tr:hover { background: #f8fafc; }
   border-radius: var(--radius) var(--radius) 0 0;
   padding: 0 4px;
 }
+/* --- Optimized Course Navigation --- */
+.course-nav {
+  display: flex;
+  flex-wrap: wrap; /* Allows items to move to the next line */
+  gap: 8px; /* Adds spacing between wrapped buttons */
+  background: white;
+  padding: 12px;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 24px;
+  border-radius: var(--radius);
+}
+
 .course-nav-btn {
-  padding: 12px 16px;
+  padding: 10px 16px;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-muted);
   cursor: pointer;
-  border: none;
-  background: none;
-  border-bottom: 2.5px solid transparent;
-  margin-bottom: -2px;
-  transition: color 0.15s, border-color 0.15s;
+  border: 1px solid transparent; /* Added for better tap target definition */
+  background: #f8fafc; /* Subtle background for buttons */
+  border-radius: 8px;
+  transition: all 0.2s;
   font-family: 'DM Sans', sans-serif;
   white-space: nowrap;
+  flex: 1 1 auto; /* Allows buttons to grow and fill space evenly */
+  text-align: center;
 }
-.course-nav-btn:hover { color: var(--primary); }
-.course-nav-btn.active { color: var(--primary-dark); border-bottom-color: var(--primary-dark); }
+
+.course-nav-btn:hover {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.course-nav-btn.active {
+  background: var(--primary-dark);
+  color: white;
+  border-color: var(--primary-dark);
+}
+
+/* --- Mobile Specific Adjustment --- */
+@media (max-width: 600px) {
+  .course-nav {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr); /* 2 buttons per row on very small phones */
+    gap: 8px;
+    padding: 8px;
+  }
+  
+  .course-nav-btn {
+    padding: 12px 8px;
+    font-size: 12px; /* Slightly smaller text to fit labels */
+  }
+}
 
 /* upcoming item */
 .upcoming-item {
