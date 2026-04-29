@@ -981,6 +981,47 @@ tbody tr:hover { background: #f8fafc; }
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
+/* --- Header Mobile Optimization --- */
+@media (max-width: 900px) {
+  .page-title-area {
+    display: none !important;
+  }
+  
+  .top-header {
+    justify-content: space-between;
+    padding: 0 12px;
+  }
+}
+
+  .header-left {
+    gap: 8px; /* Tighten gap between menu icon and logo */
+  }
+
+  .brand-text {
+    font-size: 17px; /* Slightly smaller text to prevent overlap */
+  }
+
+  /* Make the user section more compact */
+  .header-user {
+    padding: 4px 8px;
+    gap: 6px;
+  }
+
+  .user-avatar {
+    width: 30px;
+    height: 30px;
+  }
+
+
+@media (max-width: 400px) {
+  .user-info {
+    display: none; /* Only show the circle avatar on tiny screens */
+  }
+  .brand-text {
+    font-size: 15px;
+  }
+}
+
 /* ---- Info alert ---- */
 .alert {
   padding: 12px 16px;
@@ -1001,68 +1042,113 @@ tbody tr:hover { background: #f8fafc; }
 
 /* Course nav tabs (inside course view) */
 .course-nav {
-  display: flex;
-  gap: 0;
-  border-bottom: 2px solid var(--border);
-  margin-bottom: 24px;
-  overflow-x: auto;
-  flex-shrink: 0;
-  background: white;
-  border-radius: var(--radius) var(--radius) 0 0;
-  padding: 0 4px;
-}
-/* --- Optimized Course Navigation --- */
-.course-nav {
-  display: flex;
-  flex-wrap: wrap; /* Allows items to move to the next line */
-  gap: 8px; /* Adds spacing between wrapped buttons */
-  background: white;
-  padding: 12px;
+  display: grid; /* Switch to Grid for perfect alignment */
+  grid-template-columns: repeat(2, 1fr); /* Exactly 2 boxes per row */
+  gap: 12px; /* Uniform spacing between all boxes */
+  background: #ffffff;
+  padding: 16px;
   border-bottom: 2px solid var(--border);
   margin-bottom: 24px;
   border-radius: var(--radius);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+/* --- Optimized Course Navigation --- */
+.course-nav {
+  display: grid; /* Switch to Grid for perfect alignment */
+  grid-template-columns: repeat(2, 1fr); /* Exactly 2 boxes per row */
+  gap: 12px; /* Uniform spacing between all boxes */
+  background: #ffffff;
+  padding: 16px;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 24px;
+  border-radius: var(--radius);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
 }
 
 .course-nav-btn {
-  padding: 10px 16px;
+  /* Remove flex properties */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  
+  padding: 14px 10px; /* Increased padding for better touch area */
   font-size: 13px;
   font-weight: 600;
   color: var(--text-muted);
   cursor: pointer;
-  border: 1px solid transparent; /* Added for better tap target definition */
-  background: #f8fafc; /* Subtle background for buttons */
-  border-radius: 8px;
-  transition: all 0.2s;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: all 0.2s ease;
   font-family: 'DM Sans', sans-serif;
-  white-space: nowrap;
-  flex: 1 1 auto; /* Allows buttons to grow and fill space evenly */
   text-align: center;
+  width: 100%; /* Ensure it fills the grid cell */
 }
 
 .course-nav-btn:hover {
   background: var(--primary-light);
   color: var(--primary);
+  border-color: var(--primary-mid);
+  transform: translateY(-1px); /* Professional "lift" effect */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
 .course-nav-btn.active {
-  background: var(--primary-dark);
-  color: white;
+  background: var(--primary-dark) !important;
+  color: #ffffff !important; /* FIX: Force text to white for visibility */
   border-color: var(--primary-dark);
+  box-shadow: 0 4px 12px rgba(30, 64, 175, 0.3); /* Professional glow shadow */
+}
+
+
+/* Adjust for Laptop Screens */
+@media (min-width: 901px) {
+  .course-nav {
+    display: flex; /* Back to row on big screens */
+    grid-template-columns: none;
+    flex-wrap: nowrap;
+    padding: 8px 12px;
+  }
+  .course-nav-btn {
+    width: auto;
+    padding: 10px 16px;
+  }
 }
 
 /* --- Mobile Specific Adjustment --- */
 @media (max-width: 600px) {
   .course-nav {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr); /* 2 buttons per row on very small phones */
-    gap: 8px;
-    padding: 8px;
+    display: grid; /* Switch to Grid for perfect alignment */
+  grid-template-columns: repeat(2, 1fr); /* Exactly 2 boxes per row */
+  gap: 12px; /* Uniform spacing between all boxes */
+  background: #ffffff;
+  padding: 16px;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 24px;
+  border-radius: var(--radius);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
   }
   
-  .course-nav-btn {
-    padding: 12px 8px;
-    font-size: 12px; /* Slightly smaller text to fit labels */
-  }
+.course-nav-btn {
+  /* Remove flex properties */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  
+  padding: 14px 10px; /* Increased padding for better touch area */
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: all 0.2s ease;
+  font-family: 'DM Sans', sans-serif;
+  text-align: center;
+  width: 100%; /* Ensure it fills the grid cell */
 }
 
 /* upcoming item */
@@ -1149,28 +1235,42 @@ tbody tr:hover { background: #f8fafc; }
 
 /* Canvas-style Course Navigation */
 .course-nav {
-  background: white;
-  padding: 0 10px;
-  display: flex;
-  gap: 20px;
-  border-bottom: 2px solid #e2e8f0;
-  margin-bottom: 30px;
-  overflow-x: auto;
+  display: grid; /* Switch to Grid for perfect alignment */
+  grid-template-columns: repeat(2, 1fr); /* Exactly 2 boxes per row */
+  gap: 12px; /* Uniform spacing between all boxes */
+  background: #ffffff;
+  padding: 16px;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 24px;
+  border-radius: var(--radius);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
 }
 
 .course-nav-btn {
-  padding: 15px 5px;
-  border: none;
-  background: none;
+  /* Remove flex properties */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  
+  padding: 14px 10px; /* Increased padding for better touch area */
+  font-size: 13px;
   font-weight: 600;
-  color: #64748b;
-  border-bottom: 3px solid transparent;
-  cursor: button;
+  color: var(--text-muted);
+  cursor: pointer;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: all 0.2s ease;
+  font-family: 'DM Sans', sans-serif;
+  text-align: center;
+  width: 100%; /* Ensure it fills the grid cell */
 }
-
 .course-nav-btn.active {
-  color: var(--primary);
-  border-bottom-color: var(--primary);
+  background: var(--primary-dark) !important;
+  color: #ffffff !important; /* FIX: Force text to white for visibility */
+  border-color: var(--primary-dark);
+  box-shadow: 0 4px 12px rgba(30, 64, 175, 0.3); /* Professional glow shadow */
 }
 
 /* Improved Grade Badges for LK Standards */
@@ -1231,3 +1331,4 @@ tbody tr:hover { background: #f8fafc; }
 .att-btn.present.active { background: #dcfce7; color: #15803d; box-shadow: inset 0 0 0 1px #86efac; }
 .att-btn.absent.active { background: #fee2e2; color: #b91c1c; box-shadow: inset 0 0 0 1px #fca5a5; }
 .att-btn.late.active { background: #fef9c3; color: #a16207; box-shadow: inset 0 0 0 1px #fde047; }
+}
