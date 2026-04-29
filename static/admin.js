@@ -85,12 +85,17 @@ function roleBadge(role) {
 }
 
 // ---- Users ----
-async function loadAdminUsers() {
+// activeTab: 'tab-teachers' | 'tab-students' | 'tab-admins'
+async function loadAdminUsers(activeTab) {
+  if (!activeTab) {
+    const cur = document.querySelector('.tab-panel[style*="display: block"], .tab-panel.active:not([style*="display: none"])');
+    activeTab = cur ? cur.id : 'tab-teachers';
+  }
   setPageTitle('Users');
   setActiveSidebar('users');
   setContent('<div class="loading-state"><div class="spinner"></div></div>');
   const users = await api('/api/admin/users');
-  
+
   // Cache for editing
   window._adminUsers = users;
 
@@ -98,35 +103,149 @@ async function loadAdminUsers() {
   const students = users.filter(u => u.role === 'student');
   const admins   = users.filter(u => u.role === 'admin');
 
-  function userTable(list, roleLabel) {
+  // ---- Teacher table with mass-select ----
+  function teacherTable(list) {
+    if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
+    return `
+      <div class="bulk-toolbar" id="teacherBulkBar" style="display:none">
+        <span id="teacherSelCount">0</span> selected
+        <button class="btn btn-danger btn-sm" onclick="bulkDelete('teacher')">🗑 Delete Selected</button>
+        <button class="btn btn-secondary btn-sm" onclick="clearSelection('teacher')">✕ Clear</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:40px"><input type="checkbox" id="teacherSelectAll" onchange="toggleSelectAll('teacher', this.checked)" title="Select all"></th>
+            <th>Profile</th><th>Details</th><th>Contact / Extra</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="teacherTableBody">
+          ${list.map(u => {
+            const imgUrl = u.profile_image ? `/uploads/${u.profile_image.split('/').map(encodeURIComponent).join('/')}` : '';
+            const imgHtml = imgUrl
+              ? `<img src="${imgUrl}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">`
+              : `<div class="user-avatar" style="width:40px;height:40px;font-size:16px;">${u.full_name.charAt(0)}</div>`;
+            const isYou = u.id === currentUser.id;
+            return `<tr data-uid="${u.id}" data-role="teacher">
+              <td style="width:40px;text-align:center;">
+                ${isYou ? '' : `<input type="checkbox" class="row-check teacher-check" data-uid="${u.id}" onchange="onRowCheck('teacher')">`}
+              </td>
+              <td style="width:60px;text-align:center;">${imgHtml}</td>
+              <td>
+                <strong>${escHtml(u.full_name)}</strong><br>
+                <code>${escHtml(u.username)}</code><br>
+                <span class="badge badge-purple" style="margin-top:4px">teacher</span>
+              </td>
+              <td>
+                <div class="text-sm">
+                  ${u.phone ? `<strong>Phone:</strong> ${escHtml(u.phone)}<br>` : ''}
+                  ${u.dob ? `<strong>DOB:</strong> ${escHtml(u.dob)}<br>` : ''}
+                  ${u.address ? `<strong>Address:</strong> ${escHtml(u.address)}<br>` : ''}
+                  ${u.notes ? `<strong>Notes:</strong> ${escHtml(u.notes)}` : ''}
+                </div>
+              </td>
+              <td>
+                ${isYou ? '<span class="text-muted text-sm">You</span>' : `
+                  <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'teacher')">Edit</button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
+                `}
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+  }
+
+  // ---- Student table with mass-select + grade filter ----
+  function studentTable(list) {
+    if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
+
+    // Collect unique grades
+    const grades = [...new Set(list.map(u => u.grade || 'Unassigned'))].sort((a, b) => {
+      if (a === 'Unassigned') return 1;
+      if (b === 'Unassigned') return -1;
+      return a.localeCompare(b, undefined, { numeric: true });
+    });
+
+    const gradeOptions = ['All', ...grades].map(g =>
+      `<option value="${escHtml(g)}">${escHtml(g)}</option>`
+    ).join('');
+
+    return `
+      <div class="bulk-toolbar" id="studentBulkBar" style="display:none">
+        <span id="studentSelCount">0</span> selected
+        <button class="btn btn-danger btn-sm" onclick="bulkDelete('student')">🗑 Delete Selected</button>
+        <button class="btn btn-secondary btn-sm" onclick="clearSelection('student')">✕ Clear</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:40px"><input type="checkbox" id="studentSelectAll" onchange="toggleSelectAll('student', this.checked)" title="Select all"></th>
+            <th>Profile</th>
+            <th>Details</th>
+            <th style="min-width:130px">Adm. No.</th>
+            <th style="min-width:160px">
+              Grade
+              <select id="gradeFilter" onchange="filterStudentsByGrade()" style="margin-left:8px;padding:3px 6px;border-radius:6px;border:1px solid var(--border);font-size:12px;cursor:pointer;">
+                ${gradeOptions}
+              </select>
+            </th>
+            <th>Contact / Extra</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="studentTableBody">
+          ${list.map(u => {
+            const imgUrl = u.profile_image ? `/uploads/${u.profile_image.split('/').map(encodeURIComponent).join('/')}` : '';
+            const imgHtml = imgUrl
+              ? `<img src="${imgUrl}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">`
+              : `<div class="user-avatar" style="width:40px;height:40px;font-size:16px;">${u.full_name.charAt(0)}</div>`;
+            const grade = u.grade || 'Unassigned';
+            return `<tr data-uid="${u.id}" data-role="student" data-grade="${escHtml(grade)}">
+              <td style="width:40px;text-align:center;">
+                <input type="checkbox" class="row-check student-check" data-uid="${u.id}" onchange="onRowCheck('student')">
+              </td>
+              <td style="width:60px;text-align:center;">${imgHtml}</td>
+              <td>
+                <strong>${escHtml(u.full_name)}</strong><br>
+                <code>${escHtml(u.username)}</code><br>
+                <span class="badge badge-blue" style="margin-top:4px">student</span>
+              </td>
+              <td>
+                ${u.admission_number ? `<code class="adm-number">${escHtml(u.admission_number)}</code>` : '<span class="text-muted text-sm">—</span>'}
+              </td>
+              <td>
+                <span class="grade-pill">${escHtml(grade)}</span>
+              </td>
+              <td>
+                <div class="text-sm">
+                  ${u.phone ? `<strong>Phone:</strong> ${escHtml(u.phone)}<br>` : ''}
+                  ${u.dob ? `<strong>DOB:</strong> ${escHtml(u.dob)}<br>` : ''}
+                  ${u.address ? `<strong>Address:</strong> ${escHtml(u.address)}<br>` : ''}
+                  ${u.notes ? `<strong>Notes:</strong> ${escHtml(u.notes)}` : ''}
+                </div>
+              </td>
+              <td>
+                <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'student')">Edit</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+  }
+
+  function adminTable(list) {
     if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
     return `<table><thead><tr><th>Profile</th><th>Details</th><th>Contact / Extra</th><th>Actions</th></tr></thead>
     <tbody>${list.map(u => {
-      // FIX: Encode the path segments individually to preserve the slashes!
       const imgUrl = u.profile_image ? `/uploads/${u.profile_image.split('/').map(encodeURIComponent).join('/')}` : '';
-      const imgHtml = imgUrl ? `<img src="${imgUrl}" style="width:40px; height:40px; border-radius:50%; object-fit:cover;">` : `<div class="user-avatar" style="width:40px;height:40px;font-size:16px;">${u.full_name.charAt(0)}</div>`;
-      
+      const imgHtml = imgUrl ? `<img src="${imgUrl}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">` : `<div class="user-avatar" style="width:40px;height:40px;font-size:16px;">${u.full_name.charAt(0)}</div>`;
       return `<tr>
-        <td style="width:60px; text-align:center;">${imgHtml}</td>
-        <td>
-            <strong>${escHtml(u.full_name)}</strong><br>
-            <code>${escHtml(u.username)}</code><br>
-            <span class="badge ${roleBadge(u.role)}" style="margin-top:4px">${u.role}</span>
-        </td>
-        <td>
-            <div class="text-sm">
-                ${u.phone ? `<strong>Phone:</strong> ${escHtml(u.phone)}<br>` : ''}
-                ${u.dob ? `<strong>DOB:</strong> ${escHtml(u.dob)}<br>` : ''}
-                ${u.address ? `<strong>Address:</strong> ${escHtml(u.address)}<br>` : ''}
-                ${u.notes ? `<strong>Notes:</strong> ${escHtml(u.notes)}` : ''}
-            </div>
-        </td>
-        <td>
-            ${u.id !== currentUser.id ? `
-                <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id}, '${roleLabel}')">Edit</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
-            ` : '<span class="text-muted text-sm">You</span>'}
-        </td>
+        <td style="width:60px;text-align:center;">${imgHtml}</td>
+        <td><strong>${escHtml(u.full_name)}</strong><br><code>${escHtml(u.username)}</code></td>
+        <td><div class="text-sm">${u.phone ? `<strong>Phone:</strong> ${escHtml(u.phone)}<br>` : ''}${u.notes ? `<strong>Notes:</strong> ${escHtml(u.notes)}` : ''}</div></td>
+        <td>${u.id !== currentUser.id ? `<button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'admin')">Edit</button>` : '<span class="text-muted text-sm">You</span>'}</td>
       </tr>`;
     }).join('')}</tbody></table>`;
   }
@@ -137,29 +256,38 @@ async function loadAdminUsers() {
     </div>
 
     <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab(this,'tab-teachers')">👨‍🏫 Teachers (${teachers.length})</button>
-      <button class="tab-btn" onclick="switchTab(this,'tab-students')">🎒 Students (${students.length})</button>
-      <button class="tab-btn" onclick="switchTab(this,'tab-admins')">🔐 Admins (${admins.length})</button>
+      <button class="tab-btn" id="tbtn-tab-teachers" onclick="switchTab(this,'tab-teachers')">👨‍🏫 Teachers (${teachers.length})</button>
+      <button class="tab-btn" id="tbtn-tab-students" onclick="switchTab(this,'tab-students')">🎒 Students (${students.length})</button>
+      <button class="tab-btn" id="tbtn-tab-admins" onclick="switchTab(this,'tab-admins')">🔐 Admins (${admins.length})</button>
     </div>
 
-    <div id="tab-teachers" class="tab-panel active card">
-      <div class="card-header" style="background:#fafafa; display:flex; justify-content:flex-end;">
+    <div id="tab-teachers" class="tab-panel card" style="display:none">
+      <div class="card-header" style="background:#fafafa;display:flex;justify-content:flex-end;">
         <button class="btn btn-primary btn-sm" onclick="showCreateUser('teacher')">+ Create Teacher</button>
       </div>
-      <div class="card-body" style="padding:0">${userTable(teachers, 'teacher')}</div>
+      <div class="card-body" style="padding:0">${teacherTable(teachers)}</div>
     </div>
-    
+
     <div id="tab-students" class="tab-panel card" style="display:none">
-      <div class="card-header" style="background:#fafafa; display:flex; justify-content:flex-end;">
+      <div class="card-header" style="background:#fafafa;display:flex;justify-content:flex-end;">
         <button class="btn btn-primary btn-sm" onclick="showCreateUser('student')">+ Create Student</button>
       </div>
-      <div class="card-body" style="padding:0">${userTable(students, 'student')}</div>
+      <div class="card-body" style="padding:0">${studentTable(students)}</div>
     </div>
-    
+
     <div id="tab-admins" class="tab-panel card" style="display:none">
-      <div class="card-body" style="padding:0">${userTable(admins, 'admin')}</div>
+      <div class="card-body" style="padding:0">${adminTable(admins)}</div>
     </div>
   `);
+
+  // Restore whichever tab was active (or default to teachers)
+  const tabToShow = document.getElementById(activeTab) ? activeTab : 'tab-teachers';
+  const btnToActivate = document.getElementById('tbtn-' + tabToShow);
+  if (btnToActivate) switchTab(btnToActivate, tabToShow);
+}
+
+function roleToTab(role) {
+  return { teacher: 'tab-teachers', student: 'tab-students', admin: 'tab-admins' }[role] || 'tab-teachers';
 }
 
 function switchTab(btn, tabId) {
@@ -169,8 +297,94 @@ function switchTab(btn, tabId) {
   document.getElementById(tabId).style.display = 'block';
 }
 
+// ---- Mass-select helpers ----
+function toggleSelectAll(role, checked) {
+  document.querySelectorAll(`.${role}-check`).forEach(cb => {
+    const row = cb.closest('tr');
+    if (row && row.style.display !== 'none') {
+      cb.checked = checked;
+    }
+  });
+  onRowCheck(role);
+}
+
+function onRowCheck(role) {
+  const checked = document.querySelectorAll(`.${role}-check:checked`);
+  const bar = document.getElementById(`${role}BulkBar`);
+  const count = document.getElementById(`${role}SelCount`);
+  if (bar) bar.style.display = checked.length ? 'flex' : 'none';
+  if (count) count.textContent = checked.length;
+  // Sync header checkbox
+  const all = document.querySelectorAll(`.${role}-check`);
+  const visible = [...all].filter(cb => cb.closest('tr').style.display !== 'none');
+  const selectAll = document.getElementById(`${role}SelectAll`);
+  if (selectAll) selectAll.checked = visible.length > 0 && checked.length === visible.length;
+}
+
+function clearSelection(role) {
+  document.querySelectorAll(`.${role}-check`).forEach(cb => cb.checked = false);
+  const selectAll = document.getElementById(`${role}SelectAll`);
+  if (selectAll) selectAll.checked = false;
+  onRowCheck(role);
+}
+
+async function bulkDelete(role) {
+  const checked = [...document.querySelectorAll(`.${role}-check:checked`)];
+  if (!checked.length) return;
+  const ids = checked.map(cb => cb.dataset.uid);
+  const names = ids.map(id => {
+    const u = window._adminUsers.find(u => String(u.id) === String(id));
+    return u ? u.full_name : id;
+  });
+  if (!confirm(`Delete ${ids.length} ${role}(s)?\n\n${names.join(', ')}\n\nThis cannot be undone.`)) return;
+
+  let failed = 0;
+  for (const id of ids) {
+    try {
+      await apiDelete(`/api/admin/users/${id}`);
+    } catch { failed++; }
+  }
+
+  if (failed) showToast(`${ids.length - failed} deleted, ${failed} failed.`, 'error');
+  else showToast(`${ids.length} ${role}(s) deleted.`, 'success');
+  loadAdminUsers(roleToTab(role));
+}
+
+// ---- Grade filter ----
+function filterStudentsByGrade() {
+  const filter = document.getElementById('gradeFilter')?.value || 'All';
+  document.querySelectorAll('#studentTableBody tr').forEach(row => {
+    const grade = row.dataset.grade || 'Unassigned';
+    row.style.display = (filter === 'All' || grade === filter) ? '' : 'none';
+  });
+  // Uncheck hidden rows and refresh toolbar
+  document.querySelectorAll('.student-check').forEach(cb => {
+    if (cb.closest('tr').style.display === 'none') cb.checked = false;
+  });
+  onRowCheck('student');
+}
+
+const GRADE_OPTIONS = [
+  { value: '', label: '— Select Grade —' },
+  { value: 'Grade 6', label: 'Grade 6' },
+  { value: 'Grade 7', label: 'Grade 7' },
+  { value: 'Grade 8', label: 'Grade 8' },
+  { value: 'Grade 9', label: 'Grade 9' },
+  { value: 'Grade 10', label: 'Grade 10' },
+  { value: 'Grade 11 (O/L)', label: 'Grade 11 (O/L)' },
+  { value: 'Grade 12 (A/L)', label: 'Grade 12 (A/L)' },
+  { value: 'Grade 13 (A/L)', label: 'Grade 13 (A/L)' },
+];
+
 function showCreateUser(role) {
   const roleTitle = role.charAt(0).toUpperCase() + role.slice(1);
+  const gradeField = role === 'student'
+    ? [{ label: 'Grade', name: 'grade', type: 'select', options: GRADE_OPTIONS }]
+    : [];
+  const admissionField = role === 'student'
+    ? [{ label: 'Admission Number', name: 'admission_number', placeholder: 'e.g. LL-2026-0001' }]
+    : [];
+
   openModal(`Create New ${roleTitle}`, modalForm([
     { name: 'role', type: 'hidden', value: role },
     { label: 'Full Name', name: 'full_name', placeholder: 'e.g. Kasun Perera', required: true },
@@ -179,20 +393,35 @@ function showCreateUser(role) {
     { label: 'Phone Number', name: 'phone', type: 'tel', placeholder: 'e.g. 077 123 4567' },
     { label: 'Date of Birth', name: 'dob', type: 'date' },
     { label: 'Address', name: 'address', type: 'textarea', placeholder: 'Street address...' },
+    ...gradeField,
+    ...admissionField,
     { label: 'Additional Notes', name: 'notes', type: 'textarea', placeholder: 'Any extra information...' },
     { label: 'Profile Image', name: 'file', type: 'file' }
   ], async (fd) => {
     try {
       await apiPost('/api/admin/users', fd);
-      closeModal(); showToast(`${roleTitle} created successfully`, 'success'); loadAdminUsers();
+      closeModal(); showToast(`${roleTitle} created successfully`, 'success'); loadAdminUsers(roleToTab(role));
     } catch (e) { showToast(e.message, 'error'); }
   }, `Create ${roleTitle}`));
+
+  // Auto-suggest next admission number for students
+  if (role === 'student') {
+    api('/api/admin/next-admission').then(res => {
+      const field = document.querySelector('[name="admission_number"]');
+      if (field && !field.value) field.value = res.admission_number;
+    }).catch(() => {});
+  }
 }
 
 function showEditUser(id, roleLabel) {
   const u = window._adminUsers.find(x => x.id === id);
   const roleTitle = roleLabel.charAt(0).toUpperCase() + roleLabel.slice(1);
-  
+  const gradeField = roleLabel === 'student'
+    ? [{ label: 'Grade', name: 'grade', type: 'select', value: u.grade || '', options: GRADE_OPTIONS }]
+    : [];
+  const admissionField = roleLabel === 'student'
+    ? [{ label: 'Admission Number', name: 'admission_number', value: u.admission_number || '' }]
+    : [];
   openModal(`Edit ${roleTitle}: ${u.full_name}`, modalForm([
     { label: 'Full Name', name: 'full_name', value: u.full_name, required: true },
     { label: 'Username', name: 'username', value: u.username, required: true },
@@ -201,21 +430,26 @@ function showEditUser(id, roleLabel) {
     { label: 'Date of Birth', name: 'dob', type: 'date', value: u.dob || '' },
     { label: 'Address', name: 'address', type: 'textarea', value: u.address || '' },
     { label: 'Additional Notes', name: 'notes', type: 'textarea', value: u.notes || '' },
+    ...gradeField,
+    ...admissionField,
     { label: 'Update Profile Image', name: 'file', type: 'file' }
   ], async (fd) => {
     try {
       await api(`/api/admin/users/${id}`, { method: 'PUT', body: fd });
-      closeModal(); showToast('User updated!', 'success'); loadAdminUsers();
+      closeModal(); showToast('User updated!', 'success'); loadAdminUsers(roleToTab(roleLabel));
     } catch (e) { showToast(e.message, 'error'); }
   }, 'Save Changes'));
 }
 
 async function deleteUser(id, name) {
   if (!confirm(`Delete user "${name}"? This cannot be undone.`)) return;
+  // Remember which tab we're on before the DOM is rebuilt
+  const cur = document.querySelector('.tab-panel[style*="display: block"], .tab-panel.active:not([style*="display: none"])');
+  const activeTab = cur ? cur.id : 'tab-teachers';
   try {
     await apiDelete(`/api/admin/users/${id}`);
     showToast('User deleted', 'success');
-    loadAdminUsers();
+    loadAdminUsers(activeTab);
   } catch (e) { showToast(e.message, 'error'); }
 }
 

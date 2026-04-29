@@ -189,12 +189,55 @@ async function loadCalendar() {
 async function loadCourseView(courseId, courseName) {
   setPageTitle(courseName);
   setContent('<div class="loading-state"><div class="spinner"></div></div>');
+  
+  // Only inject into sidebar if we are actually on a mobile device
+  if (window.innerWidth <= 900) {
+    renderMobileSubNav(courseId);
+  } else {
+    // Ensure sidebar is clean on laptop
+    document.querySelectorAll('.sidebar-sub-menu').forEach(el => el.remove());
+  }
+
   if (currentUser.role === 'teacher') {
     await renderTeacherCourse(courseId);
   } else {
     await renderStudentCourse(courseId);
   }
-} // <--- This closing brace was missing!
+}
+
+// Automatically clean up sidebar if user resizes window from phone to laptop
+window.addEventListener('resize', () => {
+  if (window.innerWidth > 900) {
+    document.querySelectorAll('.sidebar-sub-menu').forEach(el => el.remove());
+  }
+});
+
+window.handleSubNavClick = (panelId, loadFn, label) => {
+  document.querySelectorAll('.sidebar-sub-item').forEach(el => el.classList.remove('active'));
+  const activeItem = document.getElementById(`sub-${panelId}`);
+  if (activeItem) activeItem.classList.add('active');
+  
+  const prefix = currentUser.role === 'teacher' ? 'tc-' : 'sc-';
+  document.querySelectorAll(`.${prefix}panel`).forEach(p => p.style.display = 'none');
+  
+  const targetPanel = document.getElementById(panelId);
+  if (targetPanel) {
+    targetPanel.style.display = 'block';
+    
+    // Create the "Nice Label" below the menu bar
+    const existingLabel = document.getElementById('mobileViewIndicator');
+    if (existingLabel) existingLabel.remove();
+    
+    const indicator = document.createElement('div');
+    indicator.id = 'mobileViewIndicator';
+    indicator.className = 'mobile-view-label';
+    indicator.innerHTML = `<span>📍 Viewing:</span> ${label}`;
+    targetPanel.prepend(indicator);
+  }
+  
+  loadFn();
+  if (window.innerWidth <= 900) toggleMobileSidebar();
+};
 
 function toggleMobileSidebar() {
     const sidebar = document.getElementById('sidebar');
@@ -215,3 +258,50 @@ document.addEventListener('click', function(e) {
         toggleMobileSidebar();
     }
 });
+
+
+
+function renderMobileSubNav(courseId) {
+  // Remove any existing sub-nav from a previously opened course
+  document.querySelectorAll('.sidebar-sub-menu').forEach(el => el.remove());
+  
+  const courseItem = document.getElementById(`si-course-${courseId}`);
+  if (!courseItem) return;
+
+  const subNav = document.createElement('div');
+  subNav.className = 'sidebar-sub-menu';
+  
+  // UPDATED: Full list of 10 items for the Teacher role
+  const tabs = currentUser.role === 'teacher' 
+    ? [
+        { id: 'tc-modules', icon: '📦', label: 'Modules', fn: 'tcLoadModules' },
+        { id: 'tc-assignments', icon: '✏️', label: 'Assignments', fn: 'tcLoadAssignments' },
+        { id: 'tc-discussions', icon: '💬', label: 'Discussions', fn: 'tcLoadDiscussions' },
+        { id: 'tc-announcements', icon: '📢', label: 'Announcements', fn: 'tcLoadAnnouncements' },
+        { id: 'tc-gradebook', icon: '📊', label: 'Gradebook', fn: 'tcLoadGradebook' },
+        { id: 'tc-quizzes', icon: '📝', label: 'Quizzes', fn: 'tcLoadQuizzes' },
+        { id: 'tc-rubrics', icon: '🏷️', label: 'Rubrics', fn: 'tcLoadRubrics' },
+        { id: 'tc-syllabus', icon: '📋', label: 'Syllabus', fn: 'tcLoadSyllabus' },
+        { id: 'tc-attendance', icon: '📅', label: 'Attendance', fn: 'tcLoadAttendance' },
+        { id: 'tc-students', icon: '👥', label: 'Students', fn: 'tcLoadEnrolledStudents' }
+      ]
+    : [
+        // Students usually have fewer items (7 total)
+        { id: 'sc-modules', icon: '📦', label: 'Modules', fn: 'scLoadModules' },
+        { id: 'sc-assignments', icon: '✏️', label: 'Assignments', fn: 'scLoadAssignments' },
+        { id: 'sc-discussions', icon: '💬', label: 'Discussions', fn: 'scLoadDiscussions' },
+        { id: 'sc-announcements', icon: '📢', label: 'Announcements', fn: 'scLoadAnnouncements' },
+        { id: 'sc-grades', icon: '📊', label: 'Grades', fn: 'scLoadGrades' },
+        { id: 'sc-quizzes', icon: '📝', label: 'Quizzes', fn: 'scLoadQuizzes' },
+        { id: 'sc-syllabus', icon: '📋', label: 'Syllabus', fn: 'scLoadSyllabus' }
+      ];
+
+  subNav.innerHTML = tabs.map(t => `
+    <div class="sidebar-sub-item" id="sub-${t.id}" onclick="handleSubNavClick('${t.id}', ${t.fn}, '${t.label}')">
+      <span>${t.icon}</span> ${t.label}
+    </div>
+  `).join('');
+
+  courseItem.after(subNav);
+}
+

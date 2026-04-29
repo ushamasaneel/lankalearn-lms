@@ -392,11 +392,13 @@ def init_db():
         with db.cursor() as cur:
             # Add file_name columns to tables that need them
             tables_to_update = [
-                ('users', 'dob'),                # <-- ADD THIS
-                ('users', 'address'),            # <-- ADD THIS
-                ('users', 'notes'),              # <-- ADD THIS
-                ('users', 'profile_image'),      # <-- ADD THIS
+                ('users', 'dob'),
+                ('users', 'address'),
+                ('users', 'notes'),
+                ('users', 'profile_image'),
                 ('users', 'phone'),
+                ('users', 'grade'),              # student grade/year e.g. "Grade 11 (O/L)"
+                ('users', 'admission_number'),   # unique admission number per student
                 ('assignments', 'file_name'),
                 ('discussions', 'file_name'),
                 ('announcements', 'file_name'),
@@ -672,13 +674,32 @@ def admin_stats(user=Depends(require_role("admin"))):
 
 @app.get("/api/admin/users")
 def list_users(user=Depends(require_role("admin"))):
-    return query("SELECT id, username, full_name, role, created_at, dob, address, phone, notes, profile_image FROM users ORDER BY role, full_name")
+    return query("SELECT id, username, full_name, role, created_at, dob, address, phone, notes, profile_image, grade, admission_number FROM users ORDER BY role, full_name")
+
+@app.get("/api/admin/next-admission")
+def next_admission_number(user=Depends(require_role("admin"))):
+    """Return the next available admission number suggestion, e.g. LL-2026-0042"""
+    year = datetime.now().year
+    result = query(
+        "SELECT admission_number FROM users WHERE admission_number LIKE ? ORDER BY admission_number DESC LIMIT 1",
+        (f"LL-{year}-%",), one=True
+    )
+    if result and result["admission_number"]:
+        try:
+            last_seq = int(result["admission_number"].split("-")[-1])
+            next_seq = last_seq + 1
+        except ValueError:
+            next_seq = 1
+    else:
+        next_seq = 1
+    return {"admission_number": f"LL-{year}-{next_seq:04d}"}
 
 @app.post("/api/admin/users")
 async def create_user(
     full_name: str = Form(...), username: str = Form(...), password: str = Form(...), 
     role: str = Form(...), dob: str = Form(""), address: str = Form(""), 
     phone: str = Form(""), notes: str = Form(""),
+    grade: str = Form(""), admission_number: str = Form(""),
     file: UploadFile = File(None), user=Depends(require_role("admin"))
 ):
     if role not in ("teacher", "student", "admin"):
@@ -703,9 +724,9 @@ async def create_user(
                 buffer.write(content_bytes)
 
         uid = execute("""
-            INSERT INTO users(username, password_hash, full_name, role, dob, address, phone, notes, profile_image) 
-            VALUES(?,?,?,?,?,?,?,?,?)
-        """, (username, hash_pw(password), full_name, role, dob, address, phone, notes, saved_filename))
+            INSERT INTO users(username, password_hash, full_name, role, dob, address, phone, notes, profile_image, grade, admission_number) 
+            VALUES(?,?,?,?,?,?,?,?,?,?,?)
+        """, (username, hash_pw(password), full_name, role, dob, address, phone, notes, saved_filename, grade, admission_number))
         
         return {"id": uid, "message": "User created"}
     except IntegrityError:
@@ -717,6 +738,7 @@ async def create_user(
 async def update_user(
     uid: int, full_name: str = Form(...), username: str = Form(...), password: str = Form(""), 
     dob: str = Form(""), address: str = Form(""), phone: str = Form(""), notes: str = Form(""),
+    grade: str = Form(""), admission_number: str = Form(""),
     file: UploadFile = File(None), user=Depends(require_role("admin"))
 ):
     target = query("SELECT role, profile_image, full_name FROM users WHERE id=?", (uid,), one=True)
@@ -742,12 +764,12 @@ async def update_user(
 
         if password:
             execute("""
-                UPDATE users SET full_name=?, username=?, password_hash=?, dob=?, address=?, phone=?, notes=?, profile_image=? WHERE id=?
-            """, (full_name, username, hash_pw(password), dob, address, phone, notes, saved_filename, uid))
+                UPDATE users SET full_name=?, username=?, password_hash=?, dob=?, address=?, phone=?, notes=?, profile_image=?, grade=?, admission_number=? WHERE id=?
+            """, (full_name, username, hash_pw(password), dob, address, phone, notes, saved_filename, grade, admission_number, uid))
         else:
             execute("""
-                UPDATE users SET full_name=?, username=?, dob=?, address=?, phone=?, notes=?, profile_image=? WHERE id=?
-            """, (full_name, username, dob, address, phone, notes, saved_filename, uid))
+                UPDATE users SET full_name=?, username=?, dob=?, address=?, phone=?, notes=?, profile_image=?, grade=?, admission_number=? WHERE id=?
+            """, (full_name, username, dob, address, phone, notes, saved_filename, grade, admission_number, uid))
             
         return {"ok": True}
     except IntegrityError:
