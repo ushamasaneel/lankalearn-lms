@@ -1658,7 +1658,8 @@ def student_dashboard(user=Depends(require_role("student"))):
         SELECT a.id,a.title,a.due_date,a.points,c.name as course_name,c.id as course_id
         FROM assignments a JOIN courses c ON a.course_id=c.id
         JOIN enrollments e ON e.course_id=c.id
-        WHERE e.student_id=? AND a.due_date >= CURRENT_TIMESTAMP ORDER BY a.due_date LIMIT 10
+        WHERE e.student_id=? AND a.due_date != '' AND a.due_date >= CURRENT_TIMESTAMP::text 
+        ORDER BY a.due_date LIMIT 10
     """, (user["id"],))
     
     grades = query("""
