@@ -213,8 +213,77 @@
         }
 
         @media (max-width: 1024px) {
-            body.login-body { grid-template-columns: 1fr; }
-            .login-left { display: none; }
+            body.login-body { 
+                display: flex; 
+                flex-direction: column;
+                background: #f1f5f9; /* Slightly cooler background for contrast */
+            }
+
+            /* Create a "Premium App Header" with a curved bottom */
+            .login-left { 
+                padding: 40px 20px 90px 20px; 
+                align-items: center;
+                text-align: center;
+                border-bottom-left-radius: 36px;
+                border-bottom-right-radius: 36px;
+                box-shadow: 0 10px 30px rgba(30, 58, 138, 0.15);
+            }
+
+            .brand-logo-container {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                margin-bottom: 20px;
+            }
+
+            .main-logo { 
+                height: 60px; /* Snugger, more professional fit */
+                margin-bottom: 12px;
+                filter: drop-shadow(0 4px 6px rgba(0,0,0,0.15));
+            }
+
+            .brand-name { font-size: 28px; }
+            .brand-tagline { font-size: 11px; letter-spacing: 3px; margin-top: 6px; }
+            
+            .login-headline { 
+                font-size: 22px; 
+                margin-bottom: 0; 
+                line-height: 1.3; 
+                max-width: 300px;
+            }
+            
+            /* Hide the extra fluff so the login form is the star */
+            .login-subtext, .bg-watermark { display: none; }
+
+            /* The Floating Card Overlap Effect */
+            .login-right { 
+                padding: 0 20px 40px 20px;
+                background: transparent;
+                margin-top: -65px; /* Pulls it much further up into the blue */
+                z-index: 10;
+            }
+
+            .login-card { 
+                padding: 32px 24px; 
+                border-radius: 20px;
+                /* Beautiful double-shadow for a 3D float effect */
+                box-shadow: 0 15px 35px rgba(0, 0, 0, 0.08), 0 5px 15px rgba(0,0,0,0.03);
+                border: 1px solid rgba(255,255,255,0.8);
+            }
+
+            /* Tweak the inputs specifically for mobile thumbs */
+            .form-control {
+                padding: 16px !important;
+                font-size: 16px !important; /* Forces iOS not to auto-zoom on tap */
+                border-radius: 14px !important;
+            }
+            
+            .login-btn {
+                padding: 18px;
+                font-size: 16px;
+                border-radius: 14px;
+                margin-top: 16px;
+            }
         }
     </style>
 </head>
