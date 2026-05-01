@@ -70,12 +70,16 @@ function buildSidebar() {
       <div class="sidebar-item" id="si-courses" onclick="loadAdminCourses(); setActiveSidebar('courses')">
         <span class="si-icon">📚</span> Courses
       </div>
+      <div class="sidebar-item" id="si-fees" onclick="loadAdminFees(); setActiveSidebar('fees')">
+        <span class="si-icon">💰</span> Fees
+      </div>
       <div class="sidebar-divider"></div>
       <div class="sidebar-heading">System</div>
       <div class="sidebar-item" id="si-cal" onclick="loadCalendar(); setActiveSidebar('cal')">
         <span class="si-icon">📅</span> Calendar
       </div>
     `;
+// ... rest of the function remains the same
   } else if (currentUser.role === 'teacher') {
     nav.innerHTML = `
       <div class="sidebar-heading">Teaching</div>

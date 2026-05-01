@@ -4,8 +4,12 @@ FastAPI + PostgreSQL (Render)
 Optimized for Sri Lankan Market with Real File Uploads
 """
 
-import hashlib, json, os, uuid, shutil
+import os
+import uuid
+import shutil
+import hashlib
 import psycopg2
+from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
 from psycopg2 import IntegrityError
 from datetime import datetime, timedelta
@@ -22,11 +26,9 @@ from fastapi.staticfiles import StaticFiles
 # ---------------------------------------------------------------------------
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
-# Create organized directory structure for uploaded files
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-# Create subdirectories for organization
 TEACHER_UPLOAD_DIR = UPLOAD_DIR / "teachers"
 STUDENT_UPLOAD_DIR = UPLOAD_DIR / "students"
 TEACHER_UPLOAD_DIR.mkdir(exist_ok=True)
@@ -34,67 +36,67 @@ STUDENT_UPLOAD_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(title="LankaLearn LMS")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-# This line makes the uploaded files accessible via URL
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
-# In-memory session store  {session_id: user_id}
 SESSIONS: dict[str, int] = {}
 
 # ---------------------------------------------------------------------------
-# DB helpers
+# DB & General helpers
 # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# DB helpers
-# ---------------------------------------------------------------------------
-
-# We use the Render external URL so your local computer can talk to the cloud DB
 DATABASE_URL = "postgresql://lankalearn1_user:QIkCMALDh9p4gTIkLGtmCzAl3cebZ77Q@dpg-d7mit4hf9bms7381m55g-a.oregon-postgres.render.com/lankalearn1"
 
+try:
+    DB_POOL = psycopg2.pool.SimpleConnectionPool(1, 20, DATABASE_URL)
+except Exception as e:
+    print(f"Failed to create connection pool: {e}")
+
 def get_db():
-    if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL is missing. Please set it in your environment variables.")
-    return psycopg2.connect(DATABASE_URL)
+    return DB_POOL.getconn()
 
 def query(sql: str, params=(), *, one=False, db=None):
     close = db is None
     if db is None:
         db = get_db()
     
-    with db.cursor(cursor_factory=RealDictCursor) as cur:
-        formatted_sql = sql.replace('?', '%s')
-        cur.execute(formatted_sql, params)
-        rows = cur.fetchall()
-    
-    if close:
-        db.close()
-    if one:
-        return dict(rows[0]) if rows else None
-    return [dict(r) for r in rows]
+    try:
+        with db.cursor(cursor_factory=RealDictCursor) as cur:
+            formatted_sql = sql.replace('?', '%s')
+            cur.execute(formatted_sql, params)
+            rows = cur.fetchall()
+            
+        if one: return dict(rows[0]) if rows else None
+        return [dict(r) for r in rows]
+    finally:
+        if close:
+            DB_POOL.putconn(db)
 
 def execute(sql: str, params=(), *, db=None):
     close = db is None
     if db is None:
         db = get_db()
     
-    with db.cursor() as cur:
-        formatted_sql = sql.replace('?', '%s')
-        
-        if "INSERT" in sql.upper() and "RETURNING" not in formatted_sql.upper():
-            formatted_sql += " RETURNING id"
-            
-        cur.execute(formatted_sql, params)
-        
-        last_id = None
-        if "RETURNING" in formatted_sql.upper() and cur.description:
-            result = cur.fetchone()
-            if result:
-                last_id = result[0]
+    try:
+        with db.cursor() as cur:
+            formatted_sql = sql.replace('?', '%s')
+            if "INSERT" in sql.upper() and "RETURNING" not in formatted_sql.upper():
+                formatted_sql += " RETURNING id"
                 
-    db.commit()
-    if close:
-        db.close()
-    return last_id
+            cur.execute(formatted_sql, params)
+            
+            last_id = None
+            if "RETURNING" in formatted_sql.upper() and cur.description:
+                result = cur.fetchone()
+                if result: last_id = result[0]
+                
+        db.commit()
+        return last_id
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        if close:
+            DB_POOL.putconn(db)
 
 def hash_pw(pw: str) -> str:
     return hashlib.sha256(pw.encode()).hexdigest()
@@ -104,6 +106,10 @@ def now_str() -> str:
 
 def future(days: int) -> str:
     return (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Auth helpers
@@ -428,6 +434,33 @@ def init_db():
                     UNIQUE(quiz_id, student_id)
                 )
             """)
+
+            # Create fee management tables
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS student_fee_structure (
+                    id SERIAL PRIMARY KEY,
+                    student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    monthly_fee REAL NOT NULL DEFAULT 0,
+                    currency TEXT NOT NULL DEFAULT 'LKR',
+                    effective_from TEXT NOT NULL,
+                    notes TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS student_fee_payments (
+                    id SERIAL PRIMARY KEY,
+                    student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    amount REAL NOT NULL,
+                    payment_type TEXT NOT NULL DEFAULT 'monthly',
+                    payment_for TEXT,
+                    paid_date TEXT NOT NULL,
+                    receipt_number TEXT,
+                    notes TEXT,
+                    recorded_by INTEGER REFERENCES users(id),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             
             # --- THE FIX: Auto-sync all PostgreSQL sequences ---
             tables_with_sequences = [
@@ -674,7 +707,19 @@ def admin_stats(user=Depends(require_role("admin"))):
 
 @app.get("/api/admin/users")
 def list_users(user=Depends(require_role("admin"))):
-    return query("SELECT id, username, full_name, role, created_at, dob, address, phone, notes, profile_image, grade, admission_number FROM users ORDER BY role, full_name")
+    # Detect which optional columns actually exist so a missing column never causes a 500
+    db = get_db()
+    with db.cursor() as cur:
+        cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'users'
+        """)
+        existing = {row[0] for row in cur.fetchall()}
+    db.close()
+
+    optional = ["dob", "address", "phone", "notes", "profile_image", "grade", "admission_number"]
+    select_cols = ["id", "username", "full_name", "role", "created_at"] + [c for c in optional if c in existing]
+    return query(f"SELECT {', '.join(select_cols)} FROM users ORDER BY role, full_name")
 
 @app.get("/api/admin/next-admission")
 def next_admission_number(user=Depends(require_role("admin"))):
@@ -693,6 +738,70 @@ def next_admission_number(user=Depends(require_role("admin"))):
     else:
         next_seq = 1
     return {"admission_number": f"LL-{year}-{next_seq:04d}"}
+
+# ================================================================
+# FEE MANAGEMENT ENDPOINTS
+# ================================================================
+
+@app.get("/api/admin/students/{sid}/fees")
+def get_student_fees(sid: int, user=Depends(require_role("admin"))):
+    student = query("SELECT id, full_name, admission_number, grade FROM users WHERE id=? AND role='student'", (sid,), one=True)
+    if not student: raise HTTPException(404, "Student not found")
+    structure = query("SELECT * FROM student_fee_structure WHERE student_id=? ORDER BY effective_from DESC LIMIT 1", (sid,), one=True)
+    payments  = query("""
+        SELECT p.*, u.full_name as recorded_by_name
+        FROM student_fee_payments p
+        LEFT JOIN users u ON u.id = p.recorded_by
+        WHERE p.student_id=?
+        ORDER BY p.paid_date DESC
+    """, (sid,))
+    total_paid   = sum(p["amount"] for p in payments)
+    monthly_paid = sum(p["amount"] for p in payments if p["payment_type"] == "monthly")
+    extra_paid   = sum(p["amount"] for p in payments if p["payment_type"] == "extra")
+    return {
+        "student": dict(student),
+        "structure": dict(structure) if structure else None,
+        "payments": [dict(p) for p in payments],
+        "summary": {"total_paid": total_paid, "monthly_paid": monthly_paid, "extra_paid": extra_paid}
+    }
+
+@app.post("/api/admin/students/{sid}/fee-structure")
+def set_fee_structure(
+    sid: int,
+    monthly_fee: float = Form(...),
+    effective_from: str = Form(...),
+    notes: str = Form(""),
+    user=Depends(require_role("admin"))
+):
+    student = query("SELECT id FROM users WHERE id=? AND role='student'", (sid,), one=True)
+    if not student: raise HTTPException(404, "Student not found")
+    execute("INSERT INTO student_fee_structure(student_id, monthly_fee, effective_from, notes) VALUES(?,?,?,?)",
+            (sid, monthly_fee, effective_from, notes))
+    return {"ok": True}
+
+@app.post("/api/admin/students/{sid}/fee-payments")
+def add_fee_payment(
+    sid: int,
+    amount: float = Form(...),
+    payment_type: str = Form("monthly"),
+    payment_for: str = Form(""),
+    paid_date: str = Form(...),
+    receipt_number: str = Form(""),
+    notes: str = Form(""),
+    user=Depends(require_role("admin"))
+):
+    student = query("SELECT id FROM users WHERE id=? AND role='student'", (sid,), one=True)
+    if not student: raise HTTPException(404, "Student not found")
+    execute("""
+        INSERT INTO student_fee_payments(student_id, amount, payment_type, payment_for, paid_date, receipt_number, notes, recorded_by)
+        VALUES(?,?,?,?,?,?,?,?)
+    """, (sid, amount, payment_type, payment_for, paid_date, receipt_number, notes, user["id"]))
+    return {"ok": True}
+
+@app.delete("/api/admin/fee-payments/{pid}")
+def delete_fee_payment(pid: int, user=Depends(require_role("admin"))):
+    execute("DELETE FROM student_fee_payments WHERE id=?", (pid,))
+    return {"ok": True}
 
 @app.post("/api/admin/users")
 async def create_user(
@@ -1794,16 +1903,59 @@ async def save_attendance(cid: int, request: Request, user=Depends(require_role(
 @app.get("/fix-db")
 def fix_database():
     db = get_db()
+    results = []
     try:
         with db.cursor() as cur:
-            # Forcefully inject the missing columns into PostgreSQL
-            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS dob TEXT;")
-            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;")
-            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;")
-            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS notes TEXT;")
-            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image TEXT;")
+            # ---- Missing user columns ----
+            columns = [
+                ("users", "dob",              "TEXT"),
+                ("users", "address",          "TEXT"),
+                ("users", "phone",            "TEXT"),
+                ("users", "notes",            "TEXT"),
+                ("users", "profile_image",    "TEXT"),
+                ("users", "grade",            "TEXT"),
+                ("users", "admission_number", "TEXT"),
+            ]
+            for table, col, col_type in columns:
+                try:
+                    cur.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {col_type};")
+                    results.append(f"OK: {table}.{col}")
+                except Exception as e:
+                    results.append(f"SKIP {table}.{col}: {e}")
+
+            # ---- Fee structure table ----
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS student_fee_structure (
+                    id SERIAL PRIMARY KEY,
+                    student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    monthly_fee REAL NOT NULL DEFAULT 0,
+                    currency TEXT NOT NULL DEFAULT 'LKR',
+                    effective_from TEXT NOT NULL,
+                    notes TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            results.append("OK: student_fee_structure table")
+
+            # ---- Fee payments table ----
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS student_fee_payments (
+                    id SERIAL PRIMARY KEY,
+                    student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    amount REAL NOT NULL,
+                    payment_type TEXT NOT NULL DEFAULT 'monthly',
+                    payment_for TEXT,
+                    paid_date TEXT NOT NULL,
+                    receipt_number TEXT,
+                    notes TEXT,
+                    recorded_by INTEGER REFERENCES users(id),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            results.append("OK: student_fee_payments table")
+
         db.commit()
-        return {"status": "Success! Database columns forcefully added. You can go back to the dashboard now."}
+        return {"status": "All done. Restart not needed — go back to the dashboard.", "details": results}
     except Exception as e:
         db.rollback()
         return {"status": "Error", "details": str(e)}

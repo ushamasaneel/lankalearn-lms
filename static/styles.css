@@ -1452,3 +1452,108 @@ code.adm-number {
   font-weight: 600;
   letter-spacing: 0.5px;
 }
+/* ================================================================
+   SEARCH BOX
+   ================================================================ */
+.search-box {
+  padding: 7px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 20px;
+  font-size: 13px;
+  width: 220px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  font-family: inherit;
+  background: white;
+}
+.search-box:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(30,64,175,0.08);
+}
+
+/* ================================================================
+   FEE MANAGEMENT
+   ================================================================ */
+.fee-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+@media (max-width: 700px) {
+  .fee-summary-grid { grid-template-columns: 1fr 1fr; }
+}
+.fee-stat-card {
+  border-radius: 12px;
+  padding: 14px 16px;
+  border: 1px solid transparent;
+}
+.fee-stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; opacity: 0.7; }
+.fee-stat-value { font-size: 18px; font-weight: 800; margin: 4px 0 2px; }
+.fee-stat-sub   { font-size: 11px; opacity: 0.65; }
+.fee-stat-blue   { background: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
+.fee-stat-green  { background: #f0fdf4; border-color: #bbf7d0; color: #15803d; }
+.fee-stat-purple { background: #faf5ff; border-color: #e9d5ff; color: #7e22ce; }
+.fee-stat-amber  { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+
+.fee-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.fee-add-form {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+.fee-table {
+  width: 100%;
+  font-size: 13px;
+  border-collapse: collapse;
+}
+.fee-table th {
+  background: #f8fafc;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.fee-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+.fee-table tr:hover td { background: #f8fafc; }
+
+.fee-structure-details {
+  background: #f8fafc;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+.fee-structure-details summary {
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text-muted);
+  user-select: none;
+}
+.fee-structure-details summary:hover { color: var(--primary); }
+
+.form-row-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+@media (max-width: 600px) {
+  .form-row-3 { grid-template-columns: 1fr; }
+}
