@@ -386,6 +386,18 @@ CREATE TABLE IF NOT EXISTS syllabus (
     content TEXT,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+
+CREATE TABLE IF NOT EXISTS calendar_events (
+    id SERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT,
+    event_date TEXT NOT NULL,
+    event_type TEXT NOT NULL CHECK(event_type IN ('global', 'course', 'personal')),
+    course_id INTEGER REFERENCES courses(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 def init_db():
@@ -463,10 +475,12 @@ def init_db():
             """)
             
             # --- THE FIX: Auto-sync all PostgreSQL sequences ---
+            # --- THE FIX: Auto-sync all PostgreSQL sequences ---
             tables_with_sequences = [
                 'users', 'courses', 'modules', 'materials', 'pages', 'assignments', 
                 'discussions', 'announcements', 'quizzes', 'rubrics', 'rubric_criteria', 
-                'module_items', 'submissions', 'discussion_posts', 'syllabus', 'quiz_submissions'
+                'module_items', 'submissions', 'discussion_posts', 'syllabus', 'quiz_submissions',
+                'student_fee_structure', 'student_fee_payments', 'calendar_events' # <-- Added here
             ]
             for table in tables_with_sequences:
                 try:
@@ -1793,46 +1807,69 @@ def student_courses(user=Depends(require_role("student"))):
 # Calendar (shared)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Calendar & Events (Tiered System)
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Calendar & Events (Full Grid System)
+# ---------------------------------------------------------------------------
+
 @app.get("/api/calendar")
 def calendar(user=Depends(require_user)):
-    # Get all events in one efficient query using UNION
-    if user["role"] == "teacher":
-        query_sql = """
-            SELECT a.id, a.title, a.due_date, 'assignment' as type, c.name as course_name, c.id as course_id
-            FROM assignments a JOIN courses c ON a.course_id=c.id
-            WHERE c.teacher_id=? AND a.due_date!=''
-            UNION ALL
-            SELECT q.id, q.title, q.due_date, 'quiz' as type, c.name as course_name, c.id as course_id
-            FROM quizzes q JOIN courses c ON q.course_id=c.id
-            WHERE c.teacher_id=? AND q.due_date!=''
-            UNION ALL
-            SELECT d.id, d.title, d.due_date, 'discussion' as type, c.name as course_name, c.id as course_id
-            FROM discussions d JOIN courses c ON d.course_id=c.id
-            WHERE c.teacher_id=? AND d.due_date!=''
-            ORDER BY due_date, type
-        """
-        events = query(query_sql, (user["id"], user["id"], user["id"]))
-    else:
-        query_sql = """
-            SELECT a.id, a.title, a.due_date, 'assignment' as type, c.name as course_name, c.id as course_id
-            FROM assignments a JOIN courses c ON a.course_id=c.id
-            JOIN enrollments e ON e.course_id=c.id
-            WHERE e.student_id=? AND a.due_date!=''
-            UNION ALL
-            SELECT q.id, q.title, q.due_date, 'quiz' as type, c.name as course_name, c.id as course_id
-            FROM quizzes q JOIN courses c ON q.course_id=c.id
-            JOIN enrollments e ON e.course_id=c.id
-            WHERE e.student_id=? AND q.due_date!=''
-            UNION ALL
-            SELECT d.id, d.title, d.due_date, 'discussion' as type, c.name as course_name, c.id as course_id
-            FROM discussions d JOIN courses c ON d.course_id=c.id
-            JOIN enrollments e ON e.course_id=c.id
-            WHERE e.student_id=? AND d.due_date!=''
-            ORDER BY due_date, type
-        """
-        events = query(query_sql, (user["id"], user["id"], user["id"]))
+    uid = user["id"]
+    role = user["role"]
     
-    return events
+    # 1. Fetch Custom Events
+    custom_query = """
+        SELECT e.id, e.title, COALESCE(e.start_date, e.event_date) as start_date, COALESCE(e.end_date, e.event_date) as end_date, e.has_time, e.event_type as type, c.name as course_name, e.course_id, e.user_id 
+        FROM calendar_events e LEFT JOIN courses c ON e.course_id = c.id
+        WHERE e.event_type='global' OR e.user_id=%s 
+    """
+    if role == "teacher":
+        custom_query += " OR e.course_id IN (SELECT id FROM courses WHERE teacher_id=%s)"
+        custom_events = query(custom_query, (uid, uid))
+    elif role == "student":
+        custom_query += " OR e.course_id IN (SELECT course_id FROM enrollments WHERE student_id=%s)"
+        custom_events = query(custom_query, (uid, uid))
+    else:
+        custom_events = query(custom_query, (uid,))
+
+    # 2. Fetch Automated Academic Events
+    academic_events = []
+    if role in ("teacher", "student"):
+        base_join = "JOIN courses c ON x.course_id=c.id " + ("WHERE c.teacher_id=%s" if role == "teacher" else "JOIN enrollments e ON e.course_id=c.id WHERE e.student_id=%s")
+        query_sql = f"""
+            SELECT x.id, x.title, x.due_date as start_date, x.due_date as end_date, 1 as has_time, 'assignment' as type, c.name as course_name, c.id as course_id, 0 as user_id FROM assignments x {base_join} AND x.due_date!=''
+            UNION ALL
+            SELECT x.id, x.title, x.due_date as start_date, x.due_date as end_date, 1 as has_time, 'quiz' as type, c.name as course_name, c.id as course_id, 0 as user_id FROM quizzes x {base_join} AND x.due_date!=''
+            UNION ALL
+            SELECT x.id, x.title, x.due_date as start_date, x.due_date as end_date, 1 as has_time, 'discussion' as type, c.name as course_name, c.id as course_id, 0 as user_id FROM discussions x {base_join} AND x.due_date!=''
+        """
+        academic_events = query(query_sql, (uid, uid, uid))
+
+    return custom_events + academic_events
+
+@app.post("/api/calendar/events")
+async def create_calendar_event(
+    title: str = Form(...), start_date: str = Form(...), end_date: str = Form(...), 
+    has_time: int = Form(0), event_type: str = Form(...), description: str = Form(""), 
+    course_id: Optional[int] = Form(None), user=Depends(require_user)
+):
+    if event_type == "global" and user["role"] != "admin": raise HTTPException(403, "Only admins can create global events.")
+    if event_type == "course" and user["role"] != "teacher": raise HTTPException(403, "Only teachers can create course events.")
+
+    eid = execute("INSERT INTO calendar_events(title, description, start_date, end_date, has_time, event_date, event_type, course_id, user_id) VALUES(?,?,?,?,?,?,?,?,?)",
+                  (title, description, start_date, end_date, has_time, start_date, event_type, course_id, user["id"]))
+    return {"id": eid, "message": "Event created"}
+
+@app.delete("/api/calendar/events/{eid}")
+def delete_calendar_event(eid: int, user=Depends(require_user)):
+    event = query("SELECT user_id FROM calendar_events WHERE id=?", (eid,), one=True)
+    if event and (event["user_id"] == user["id"] or user["role"] == "admin"):
+        execute("DELETE FROM calendar_events WHERE id=?", (eid,))
+        return {"ok": True}
+    raise HTTPException(403, "Not authorized to delete this event")
 
 # ---------------------------------------------------------------------------
 # Entry point
@@ -1953,6 +1990,30 @@ def fix_database():
                 );
             """)
             results.append("OK: student_fee_payments table")
+
+            # ---- Calendar events table (THE UPGRADE) ----
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS calendar_events (
+                    id SERIAL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    event_date TEXT,
+                    start_date TEXT,
+                    end_date TEXT,
+                    has_time INTEGER DEFAULT 0,
+                    event_type TEXT NOT NULL CHECK(event_type IN ('global', 'course', 'personal')),
+                    course_id INTEGER REFERENCES courses(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            
+            # Use safe IF NOT EXISTS directly in the SQL to prevent transaction rollbacks
+            cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS start_date TEXT;")
+            cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS end_date TEXT;")
+            cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS has_time INTEGER DEFAULT 0;")
+            
+            results.append("OK: calendar_events upgraded for multi-day support")
 
         db.commit()
         return {"status": "All done. Restart not needed — go back to the dashboard.", "details": results}

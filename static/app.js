@@ -153,44 +153,204 @@ function escHtml(str) {
 }
 
 // ---- Calendar (shared) ----
+// ---- Tiered Interactive Calendar ----
+// ---- Full Grid Calendar ----
+// ---- Full Grid Calendar (Mobile Scaled) ----
+let currentCalDate = new Date();
+let cachedEvents = [];
+
 async function loadCalendar() {
   setPageTitle('Calendar');
-  setActiveSidebar(currentUser.role === 'teacher' ? 'tcal' : 'scal');
+  const roleCode = currentUser.role === 'admin' ? 'cal' : (currentUser.role === 'teacher' ? 'tcal' : 'scal');
+  setActiveSidebar(roleCode);
   setContent('<div class="loading-state"><div class="spinner"></div></div>');
-  const events = await api('/api/calendar').catch(() => []);
-  const upcoming = events.filter(e => e.due_date && new Date(e.due_date) >= new Date());
-  const past = events.filter(e => e.due_date && new Date(e.due_date) < new Date());
+  
+  // Inject CSS for the Grid (Responsive scaling instead of a list)
+  if (!document.getElementById('calGridStyles')) {
+    const style = document.createElement('style');
+    style.id = 'calGridStyles';
+    style.innerHTML = `
+      .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-top:16px;}
+      .cal-header-cell { background: #f8fafc; padding: 12px; text-align: center; font-weight: 700; font-size: 12px; text-transform: uppercase; color: var(--text-muted); }
+      .cal-cell { background: white; min-height: 110px; padding: 6px; display: flex; flex-direction: column; gap: 4px; transition: background 0.2s; }
+      .cal-cell:hover { background: #f8fafc; }
+      .cal-cell.empty { background: #f1f5f9; color: #cbd5e1; }
+      .cal-cell.today { background: #eff6ff; box-shadow: inset 0 0 0 2px var(--primary); }
+      .cal-date-num { font-weight: 600; font-size: 13px; margin-bottom: 4px; text-align: right; padding-right:4px;}
+      .cal-event-pill { font-size: 10.5px; font-weight: 600; padding: 4px 6px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; color: white; box-shadow: 0 1px 2px rgba(0,0,0,0.1); transition: opacity 0.2s; }
+      .cal-event-pill:hover { opacity: 0.8; }
+      .bg-global { background: #ef4444; } .bg-course { background: #8b5cf6; } .bg-personal { background: #10b981; } .bg-academic { background: #3b82f6; }
 
-  function renderEvents(list) {
-    if (!list.length) return emptyState('📅','No events');
-    return list.map(e => {
-      const d = new Date(e.due_date);
-      const day = d.getDate();
-      const mon = d.toLocaleString('en',{month:'short'});
-      const typeIcon = e.type === 'assignment' ? '✏️' : e.type === 'quiz' ? '📝' : '💬';
-      return `<div class="calendar-event">
-        <div class="cal-date-box"><div class="cal-day">${day}</div><div class="cal-month">${mon}</div></div>
-        <div class="cal-info">
-          <div class="cal-title">${typeIcon} ${escHtml(e.title)}</div>
-          <div class="cal-course">${escHtml(e.course_name)}</div>
-        </div>
-        <div><span class="badge badge-blue">${e.type}</span></div>
-      </div>`;
-    }).join('');
+      /* Mobile Grid Scaling (Squish to fit) */
+      @media (max-width: 768px) {
+        .page-header-row { flex-direction: column; gap: 12px; align-items: stretch !important; }
+        .page-header-row h1 { font-size: 20px !important; }
+        
+        /* Keep the 7 columns, but reduce spacing and font sizes */
+        .cal-header-cell { padding: 8px 2px; font-size: 10px; }
+        .cal-cell { min-height: 70px; padding: 3px; gap: 2px; }
+        .cal-date-num { font-size: 11px; text-align: center; margin-bottom: 2px; padding: 0; }
+        
+        /* Make the event pills tiny so they fit */
+        .cal-event-pill { font-size: 9px; padding: 3px 2px; border-radius: 2px; letter-spacing: -0.2px; line-height: 1; text-align: center;}
+      }
+      
+      /* Extra tiny screens */
+      @media (max-width: 400px) {
+        .cal-header-cell { font-size: 8.5px; letter-spacing: -0.5px; }
+        .cal-event-pill { font-size: 8px; }
+      }
+    `;
+    document.head.appendChild(style);
   }
 
-  setContent(`
-    <div class="page-header"><h1>📅 Calendar</h1><p>Upcoming due dates across all your courses</p></div>
-    <div class="card mb-24">
-      <div class="card-header"><span class="card-title">Upcoming (${upcoming.length})</span></div>
-      <div>${renderEvents(upcoming)}</div>
-    </div>
-    <div class="card">
-      <div class="card-header"><span class="card-title">Past Events (${past.length})</span></div>
-      <div>${renderEvents(past)}</div>
-    </div>
-  `);
+  cachedEvents = await api('/api/calendar').catch(() => []);
+  renderCalendarMonth();
 }
+
+function renderCalendarMonth() {
+  const year = currentCalDate.getFullYear();
+  const month = currentCalDate.getMonth();
+  const today = new Date();
+  
+  const firstDay = new Date(year, month, 1).getDay(); // 0 is Sunday
+  const startOffset = firstDay === 0 ? 6 : firstDay - 1; // Make Monday first
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  
+  const monthName = currentCalDate.toLocaleString('default', { month: 'long', year: 'numeric' });
+
+  let html = `
+    <div class="page-header page-header-row" style="align-items:center;">
+      <div style="display:flex; align-items:center; justify-content:space-between; width:100%; max-width: 400px; margin: 0 auto;">
+        <button class="btn btn-secondary btn-sm" onclick="changeMonth(-1)">◀ Prev</button>
+        <h1 style="margin:0; text-align:center;">${monthName}</h1>
+        <button class="btn btn-secondary btn-sm" onclick="changeMonth(1)">Next ▶</button>
+      </div>
+      <button class="btn btn-primary" onclick="showAddEventModal()">+ Add Event</button>
+    </div>
+    <div class="cal-grid">
+      <div class="cal-header-cell">Mon</div><div class="cal-header-cell">Tue</div>
+      <div class="cal-header-cell">Wed</div><div class="cal-header-cell">Thu</div>
+      <div class="cal-header-cell">Fri</div><div class="cal-header-cell">Sat</div>
+      <div class="cal-header-cell">Sun</div>
+  `;
+
+  // Empty cells before start of month
+  for (let i = 0; i < startOffset; i++) { html += `<div class="cal-cell empty"></div>`; }
+
+  // Days of the month
+  for (let d = 1; d <= daysInMonth; d++) {
+    const isToday = d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+    const currentDateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    
+    // Find events falling on this day
+    const dayEvents = cachedEvents.filter(e => {
+        if (!e.start_date) return false;
+        const s = e.start_date.split('T')[0];
+        const en = (e.end_date || e.start_date).split('T')[0];
+        return currentDateStr >= s && currentDateStr <= en;
+    });
+
+    html += `<div class="cal-cell ${isToday ? 'today' : ''}">
+      <div class="cal-date-num">${d}</div>
+      ${dayEvents.map(e => {
+        let bgClass = e.type === 'global' ? 'bg-global' : e.type === 'course' ? 'bg-course' : e.type === 'personal' ? 'bg-personal' : 'bg-academic';
+        let timeStr = (e.has_time && e.start_date.includes('T')) ? `<span style="opacity:0.8; margin-right:2px;">${e.start_date.split('T')[1]}</span>` : '';
+        return `<div class="cal-event-pill ${bgClass}" onclick="viewCalendarEvent(${e.id})" title="${escHtml(e.title)}">${timeStr}${escHtml(e.title)}</div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  // Fill remainder of grid
+  const totalCells = startOffset + daysInMonth;
+  const trailingEmpty = (totalCells % 7 === 0) ? 0 : 7 - (totalCells % 7);
+  for (let i = 0; i < trailingEmpty; i++) { html += `<div class="cal-cell empty"></div>`; }
+
+  html += `</div>`;
+  setContent(html);
+}
+
+
+window.changeMonth = (offset) => {
+  currentCalDate.setMonth(currentCalDate.getMonth() + offset);
+  renderCalendarMonth();
+};
+
+window.showAddEventModal = async () => {
+  let typeOptions = `<option value="personal">👤 Personal Reminder</option>`;
+  let courseSelectHtml = '';
+  if (currentUser.role === 'admin') typeOptions = `<option value="global">🏫 Global School Event (All Users)</option>` + typeOptions;
+  else if (currentUser.role === 'teacher') {
+    typeOptions = `<option value="course">🎒 Course Event</option>` + typeOptions;
+    const courses = await api('/api/teacher/courses').catch(() => []);
+    courseSelectHtml = `<div class="form-group" id="courseSelectGroup"><label>Course</label><select name="course_id" class="form-control">${courses.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('')}</select></div>`;
+  }
+
+  openModal('Add Calendar Event', `
+    <form id="calEventForm" onsubmit="return false">
+      <div class="form-row form-row-2">
+        <div class="form-group"><label>Event Type</label><select name="event_type" id="calEventType" class="form-control" onchange="document.getElementById('courseSelectGroup').style.display = this.value==='course'?'block':'none'">${typeOptions}</select></div>
+        ${courseSelectHtml || '<div></div>'}
+      </div>
+      <div class="form-group"><label>Event Title</label><input type="text" name="title" class="form-control" required></div>
+      
+      <div style="background:#f8fafc; border:1px solid var(--border); padding:16px; border-radius:8px; margin-bottom:16px;">
+        <label style="display:flex; align-items:center; gap:8px; font-weight:700; cursor:pointer; margin-bottom:12px;">
+          <input type="checkbox" id="hasTimeCheck" onchange="toggleTimeFields()" style="transform:scale(1.2)"> Include Specific Time
+        </label>
+        <div class="form-row form-row-2" style="margin:0">
+          <div class="form-group" style="margin:0"><label>Start</label><input type="date" name="start_date" id="calStart" class="form-control" required></div>
+          <div class="form-group" style="margin:0"><label>End</label><input type="date" name="end_date" id="calEnd" class="form-control" required></div>
+        </div>
+      </div>
+
+      <div class="form-group"><label>Description</label><textarea name="description" class="form-control" style="min-height:60px"></textarea></div>
+      <div class="flex gap-8 mt-16" style="justify-content:flex-end">
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="submitCalendarEvent()">Save Event</button>
+      </div>
+    </form>
+  `);
+  if(document.getElementById('courseSelectGroup')) document.getElementById('calEventType').dispatchEvent(new Event('change'));
+};
+
+window.toggleTimeFields = () => {
+  const isTime = document.getElementById('hasTimeCheck').checked;
+  document.getElementById('calStart').type = isTime ? 'datetime-local' : 'date';
+  document.getElementById('calEnd').type = isTime ? 'datetime-local' : 'date';
+};
+
+window.submitCalendarEvent = async () => {
+  const form = document.getElementById('calEventForm');
+  if (!form.checkValidity()) { form.reportValidity(); return; }
+  const fd = new FormData(form);
+  fd.append('has_time', document.getElementById('hasTimeCheck').checked ? '1' : '0');
+  
+  try {
+    await apiPost('/api/calendar/events', fd);
+    closeModal(); showToast('Event added!', 'success'); loadCalendar();
+  } catch (e) { showToast(e.message, 'error'); }
+};
+
+window.viewCalendarEvent = (eid) => {
+  const e = cachedEvents.find(x => x.id === eid);
+  if(!e) return;
+  const canDelete = ['global', 'course', 'personal'].includes(e.type) && (currentUser.role === 'admin' || e.user_id === currentUser.id);
+  openModal(e.title, `
+    <div class="alert alert-info">📅 From: ${e.start_date.replace('T', ' ')}<br>📅 To: ${e.end_date ? e.end_date.replace('T', ' ') : '—'}</div>
+    <p>${e.course_name ? `<strong>Course:</strong> ${escHtml(e.course_name)}` : ''}</p>
+    <p>${e.description || 'No additional details provided.'}</p>
+    ${canDelete ? `<div style="margin-top:20px; border-top:1px solid var(--border); padding-top:16px; text-align:right;"><button class="btn btn-danger btn-sm" onclick="deleteCalendarEvent(${e.id})">Delete Event</button></div>` : ''}
+  `);
+};
+
+window.deleteCalendarEvent = async (eid) => {
+  if (!confirm('Delete this event?')) return;
+  try {
+    await apiDelete(`/api/calendar/events/${eid}`);
+    closeModal(); showToast('Event deleted', 'success'); loadCalendar();
+  } catch (e) { showToast(e.message, 'error'); }
+};
 
 // ---- Course view router ----
 async function loadCourseView(courseId, courseName) {
