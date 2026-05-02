@@ -94,7 +94,7 @@ function buildSidebar() {
       <div id="teacherCourseList" class="sidebar-course-list"></div>
     `;
     loadTeacherSidebarCourses();
-  } else {
+  }  else {
     nav.innerHTML = `
       <div class="sidebar-heading">Learning</div>
       <div class="sidebar-item" id="si-sdash" onclick="loadStudentDashboard(); setActiveSidebar('sdash')">
@@ -102,6 +102,9 @@ function buildSidebar() {
       </div>
       <div class="sidebar-item" id="si-scal" onclick="loadCalendar(); setActiveSidebar('scal')">
         <span class="si-icon">📅</span> Calendar
+      </div>
+      <div class="sidebar-item" id="si-sfees" onclick="loadStudentFees(); setActiveSidebar('sfees')">
+        <span class="si-icon">💰</span> Fees
       </div>
       <div class="sidebar-divider"></div>
       <div class="sidebar-heading">My Courses</div>

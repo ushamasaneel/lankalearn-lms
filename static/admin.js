@@ -147,6 +147,7 @@ async function loadAdminUsers(activeTab) {
               <td>
                 ${isYou ? '<span class="text-muted text-sm">You</span>' : `
                   <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'teacher')">Edit</button>
+                  <button class="btn btn-secondary btn-sm" onclick="printUserProfile(${u.id})" title="Print Profile">🖨️</button>
                   <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
                 `}
               </td>
@@ -228,6 +229,7 @@ async function loadAdminUsers(activeTab) {
               <td>
                 <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'student')">Edit</button>
                 <button class="btn btn-sm" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="showStudentFees(${u.id},'${escHtml(u.full_name)}')">💰 Fees</button>
+                <button class="btn btn-secondary btn-sm" onclick="printUserProfile(${u.id})" title="Print Profile">🖨️</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
               </td>
             </tr>`;
@@ -560,30 +562,62 @@ async function deleteCourse(id, name) {
 async function manageEnrollments(courseId, courseName) {
   const data = await api(`/api/admin/courses/${courseId}/students`);
 
-  let html = `<h4 style="margin-bottom:12px">Currently Enrolled (${data.enrolled.length})</h4>`;
-  if (data.enrolled.length) {
-    html += `<table><thead><tr><th>Name</th><th>Username</th><th>Enrolled</th><th></th></tr></thead><tbody>
-    ${data.enrolled.map(s => `<tr>
-      <td>${escHtml(s.full_name)}</td>
-      <td><code>${escHtml(s.username)}</code></td>
-      <td>${fmtDate(s.enrolled_at)}</td>
-      <td><button class="btn btn-danger btn-xs" onclick="unenrollStudent(${courseId},${s.id},'${escHtml(s.full_name)}','${escHtml(courseName)}')">Remove</button></td>
-    </tr>`).join('')}</tbody></table>`;
-  } else {
-    html += '<p class="text-muted text-sm">No students enrolled yet.</p>';
-  }
+  let html = `
+    <div style="display:flex; gap:20px; align-items:flex-start;">
+      <div style="flex:1; border:1px solid var(--border); border-radius:8px; padding:16px; background:#fafafa;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+          <h4 style="margin:0">Currently Enrolled (${data.enrolled.length})</h4>
+          <button class="btn btn-danger btn-xs" onclick="bulkUnenroll(${courseId})">Remove Selected</button>
+        </div>
+        <div style="max-height:300px; overflow-y:auto; border:1px solid #e2e8f0; background:white;">
+          <table style="width:100%; font-size:13px;">
+            <thead style="position:sticky; top:0; background:#f8fafc; z-index:1;"><tr><th style="padding:8px"><input type="checkbox" onchange="document.querySelectorAll('.unenroll-chk').forEach(c => c.checked = this.checked)"></th><th style="padding:8px">Student</th></tr></thead>
+            <tbody>
+              ${data.enrolled.map(s => `<tr><td style="padding:8px; border-bottom:1px solid #eee;"><input type="checkbox" class="unenroll-chk" value="${s.id}"></td><td style="padding:8px; border-bottom:1px solid #eee;">${escHtml(s.full_name)} <span class="text-muted">(${s.username})</span></td></tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-  html += `<h4 style="margin:20px 0 12px">Add Student</h4>`;
-  if (data.available.length) {
-    html += `<div class="flex gap-8 flex-wrap">
-    ${data.available.map(s => `
-      <button class="btn btn-secondary btn-sm" onclick="enrollStudent(${courseId},${s.id},'${escHtml(s.full_name)}','${escHtml(courseName)}')">
-        + ${escHtml(s.full_name)}
-      </button>`).join('')}
-    </div>`;
-  } else {
-    html += '<p class="text-muted text-sm">All students are enrolled.</p>';
-  }
+      <div style="flex:1; border:1px solid var(--border); border-radius:8px; padding:16px; background:#fafafa;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h4 style="margin:0">Add Students</h4>
+          <button class="btn btn-primary btn-xs" onclick="bulkEnroll(${courseId})">+ Enroll Selected</button>
+        </div>
+        <input type="text" id="addStudentSearch" class="form-control mb-8" style="padding:6px; font-size:12px;" placeholder="Search name or grade..." oninput="filterAddStudents()">
+        <div style="max-height:265px; overflow-y:auto; border:1px solid #e2e8f0; background:white;">
+          <table style="width:100%; font-size:13px;" id="addStudentsTable">
+            <thead style="position:sticky; top:0; background:#f8fafc; z-index:1;"><tr><th style="padding:8px"><input type="checkbox" onchange="document.querySelectorAll('.enroll-chk:not([style*=\\'display: none\\'])').forEach(c => c.checked = this.checked)"></th><th style="padding:8px">Available Students</th></tr></thead>
+            <tbody>
+              ${data.available.map(s => `<tr><td style="padding:8px; border-bottom:1px solid #eee;"><input type="checkbox" class="enroll-chk" value="${s.id}"></td><td style="padding:8px; border-bottom:1px solid #eee;" class="stu-name">${escHtml(s.full_name)} <span class="text-muted">(${s.username})</span></td></tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+
+  window.filterAddStudents = () => {
+    const q = document.getElementById('addStudentSearch').value.toLowerCase();
+    document.querySelectorAll('#addStudentsTable tbody tr').forEach(row => {
+      row.style.display = row.querySelector('.stu-name').textContent.toLowerCase().includes(q) ? '' : 'none';
+      if(row.style.display === 'none') row.querySelector('.enroll-chk').checked = false;
+    });
+  };
+
+  window.bulkEnroll = async (cid) => {
+    const ids = Array.from(document.querySelectorAll('.enroll-chk:checked')).map(c => parseInt(c.value));
+    if(!ids.length) return;
+    await apiJSON(`/api/admin/courses/${cid}/enroll/bulk`, { student_ids: ids });
+    manageEnrollments(cid, courseName);
+  };
+
+  window.bulkUnenroll = async (cid) => {
+    const ids = Array.from(document.querySelectorAll('.unenroll-chk:checked')).map(c => parseInt(c.value));
+    if(!ids.length) return;
+    await apiJSON(`/api/admin/courses/${cid}/unenroll/bulk`, { student_ids: ids });
+    manageEnrollments(cid, courseName);
+  };
 
   openModal(`Students — ${courseName}`, html, 'modal-box-lg');
 }
@@ -949,7 +983,10 @@ async function loadAdminFees() {
   
   setContent(`
     <div class="page-header page-header-row">
-      <div><h1>💰 Fee Management</h1><p>Record payments and print receipts</p></div>
+      <div style="display:flex; justify-content:space-between; width:100%;">
+        <div><h1>💰 Fee Management</h1><p>Record payments and print receipts</p></div>
+        <button class="btn btn-secondary" onclick="printMasterFeeReport()">🖨️ Print Master Report</button>
+      </div>
     </div>
     <div class="card">
       <div class="card-header" style="background:#fafafa;">
@@ -1021,3 +1058,39 @@ async function printPaymentReceipt(paymentId, studentId) {
   </body></html>`);
   win.document.close();
 }
+
+
+// Add to bottom of admin.js
+window.printUserProfile = (uid) => {
+  const u = window._adminUsers.find(x => x.id === uid);
+  const win = window.open('', '_blank');
+  win.document.write(`
+    <html><head><title>Profile - ${u.full_name}</title>
+    <style>body{font-family:Arial; padding:40px; line-height:1.6;} .box{border:1px solid #ccc; padding:20px; border-radius:8px;}</style>
+    </head><body>
+    <h2>🎓 LankaLearn User Profile</h2><div class="box">
+    <p><strong>Name:</strong> ${u.full_name}</p>
+    <p><strong>Username:</strong> ${u.username}</p>
+    <p><strong>Role:</strong> <span style="text-transform:uppercase">${u.role}</span></p>
+    <p><strong>Phone:</strong> ${u.phone || 'N/A'}</p>
+    <p><strong>DOB:</strong> ${u.dob || 'N/A'}</p>
+    <p><strong>Address:</strong> ${u.address || 'N/A'}</p>
+    ${u.role === 'student' ? `<p><strong>Grade:</strong> ${u.grade || 'N/A'}</p><p><strong>Adm. No:</strong> ${u.admission_number || 'N/A'}</p>` : ''}
+    <p><strong>Internal Notes:</strong> ${u.notes || 'None'}</p>
+    </div><script>window.onload=()=>window.print()</script></body></html>
+  `);
+  win.document.close();
+};
+
+window.printMasterFeeReport = async () => {
+  const users = await api('/api/admin/users');
+  const students = users.filter(u => u.role === 'student');
+  const win = window.open('', '_blank');
+  win.document.write(`<html><head><title>Master Fee Report</title>
+    <style>body{font-family:Arial; padding:20px;} table{width:100%;border-collapse:collapse;margin-top:20px;font-size:12px;} th,td{padding:8px;border:1px solid #ddd;text-align:left;} th{background:#1e3a8a;color:white;}</style>
+    </head><body><h2>💰 LankaLearn - Master Student List</h2>
+    <table><tr><th>Student Name</th><th>Adm. No</th><th>Grade</th><th>Contact</th></tr>
+    ${students.map(s => `<tr><td>${s.full_name}</td><td>${s.admission_number||'-'}</td><td>${s.grade||'-'}</td><td>${s.phone||'-'}</td></tr>`).join('')}
+    </table><script>window.onload=()=>window.print()</script></body></html>`);
+  win.document.close();
+};

@@ -1962,5 +1962,29 @@ def fix_database():
     finally:
         db.close()
 
+
+# --- BULK ENROLLMENT & STUDENT FEES ---
+@app.post("/api/admin/courses/{cid}/enroll/bulk")
+async def bulk_enroll(cid: int, request: Request, user=Depends(require_role("admin"))):
+    data = await request.json()
+    for sid in data.get("student_ids", []):
+        try: execute("INSERT INTO enrollments(student_id,course_id) VALUES(?,?)", (sid, cid))
+        except IntegrityError: pass
+    return {"ok": True}
+
+@app.post("/api/admin/courses/{cid}/unenroll/bulk")
+async def bulk_unenroll(cid: int, request: Request, user=Depends(require_role("admin"))):
+    data = await request.json()
+    for sid in data.get("student_ids", []):
+        execute("DELETE FROM enrollments WHERE course_id=? AND student_id=?", (cid, sid))
+    return {"ok": True}
+
+@app.get("/api/student/fees")
+def get_my_fees(user=Depends(require_role("student"))):
+    sid = user["id"]
+    structure = query("SELECT * FROM student_fee_structure WHERE student_id=? ORDER BY effective_from DESC LIMIT 1", (sid,), one=True)
+    payments = query("SELECT * FROM student_fee_payments WHERE student_id=? ORDER BY paid_date DESC", (sid,))
+    return {"structure": dict(structure) if structure else None, "payments": [dict(p) for p in payments]}        
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))

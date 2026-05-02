@@ -766,3 +766,78 @@ async function scLoadSyllabus() {
     </div>
   </div>`;
 }
+
+// ================================================================
+// STUDENT FEE DASHBOARD
+// ================================================================
+async function loadStudentFees() {
+  setPageTitle('My Fees');
+  setActiveSidebar('sfees');
+  setContent('<div class="loading-state"><div class="spinner"></div></div>');
+  
+  const data = await api('/api/student/fees').catch(() => null);
+  if (!data) { setContent('<p class="text-muted">Error loading fees.</p>'); return; }
+  
+  const currency = data.structure?.currency || 'LKR';
+  const fmt = n => `${currency} ${Number(n).toLocaleString('en-LK', { minimumFractionDigits: 2 })}`;
+  const totalPaid = data.payments.reduce((sum, p) => sum + p.amount, 0);
+
+  setContent(`
+    <div class="page-header page-header-row">
+      <div><h1>💰 My Fee Statement</h1><p>View your payment history and current rates.</p></div>
+      <button class="btn btn-primary" onclick="printMyFeeStatement()">🖨️ Print Statement</button>
+    </div>
+    
+    <div class="stat-grid" style="margin-bottom:24px">
+      <div class="stat-card">
+        <div class="stat-label">Monthly Rate</div>
+        <div class="stat-value">${data.structure ? fmt(data.structure.monthly_fee) : 'Not Set'}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total Paid (All Time)</div>
+        <div class="stat-value" style="color:var(--success)">${fmt(totalPaid)}</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Payment History</span></div>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>Date</th><th>Type</th><th>Purpose</th><th>Amount</th><th>Receipt #</th></tr></thead>
+          <tbody>
+            ${data.payments.length ? data.payments.map(p => `
+              <tr>
+                <td>${p.paid_date}</td>
+                <td><span class="badge ${p.payment_type==='monthly'?'badge-blue':'badge-purple'}">${p.payment_type}</span></td>
+                <td>${escHtml(p.payment_for || '—')}</td>
+                <td><strong>${fmt(p.amount)}</strong></td>
+                <td><code>${escHtml(p.receipt_number || '—')}</code></td>
+              </tr>
+            `).join('') : '<tr><td colspan="5" class="text-center text-muted">No payments found.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `);
+
+  window.printMyFeeStatement = () => {
+    const win = window.open('', '_blank');
+    const today = new Date().toLocaleDateString('en-LK');
+    win.document.write(`
+      <html><head><title>My Fee Statement</title>
+      <style>body{font-family:Arial,sans-serif;padding:40px;} table{width:100%;border-collapse:collapse;margin-top:20px;} th,td{padding:10px;border-bottom:1px solid #ddd;text-align:left;} th{background:#f8fafc;}</style>
+      </head><body>
+      <h2>🎓 LankaLearn - Official Fee Statement</h2>
+      <p><strong>Student:</strong> ${currentUser.full_name}<br><strong>Date Generated:</strong> ${today}</p>
+      <hr>
+      <h3>Payment History</h3>
+      <table>
+        <tr><th>Date</th><th>Type</th><th>Purpose</th><th>Receipt #</th><th>Amount</th></tr>
+        ${data.payments.map(p => `<tr><td>${p.paid_date}</td><td>${p.payment_type}</td><td>${p.payment_for||'-'}</td><td>${p.receipt_number||'-'}</td><td>${fmt(p.amount)}</td></tr>`).join('')}
+      </table>
+      <h3 style="text-align:right">Total Paid: ${fmt(totalPaid)}</h3>
+      <script>window.onload=()=>window.print()</script></body></html>
+    `);
+    win.document.close();
+  };
+}
