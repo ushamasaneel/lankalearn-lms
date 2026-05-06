@@ -45,6 +45,37 @@ window.addEventListener('DOMContentLoaded', async () => {
       };
   }
 
+
+// Check for active broadcasts
+// Check for active broadcasts
+// Check for active broadcasts
+api('/api/broadcasts/active').then(alert => {
+    if (alert) {
+        // Tie the dismissed memory to the specific user ID
+        const storageKey = `dismissedAlerts_${currentUser.id}`;
+        let dismissed = JSON.parse(localStorage.getItem(storageKey) || '[]');
+        if (dismissed.includes(alert.id)) return;
+
+        const banner = document.createElement('div');
+        banner.style.cssText = "background: #dc2626; color: white; padding: 10px 20px; text-align: center; font-weight: 600; font-size: 13.5px; z-index: 1050; position: relative;";
+        
+        window.dismissAlert = (alertId, element) => {
+            dismissed.push(alertId);
+            localStorage.setItem(storageKey, JSON.stringify(dismissed)); // Update key here too
+            element.style.display = 'none';
+            document.querySelector('.top-header').style.top = '0px';
+            document.querySelector('.sidebar').style.top = '64px';
+        };
+
+        banner.innerHTML = `🚨 <strong>${escHtml(alert.title)}:</strong> ${escHtml(alert.message)} <span style="float:right; cursor:pointer;" onclick="dismissAlert(${alert.id}, this.parentElement)">✕</span>`;
+        document.body.insertBefore(banner, document.body.firstChild);
+        
+        document.querySelector('.top-header').style.top = banner.offsetHeight + 'px';
+        document.querySelector('.sidebar').style.top = (64 + banner.offsetHeight) + 'px';
+    }
+}).catch(() => {});
+
+
  // Route to default view based on role
   if (currentUser.role === 'admin' || currentUser.role === 'sub_admin' || currentUser.role === 'super_admin') {
       loadAdminDashboard();
@@ -105,6 +136,10 @@ function buildSidebar() {
       </div>
       <div class="sidebar-item" id="si-help" onclick="loadFAQ(); setActiveSidebar('help')">
         <span class="si-icon">❓</span> Help & Support
+      </div>
+
+      <div class="sidebar-item" id="si-exec" onclick="loadExecutiveDashboard(); setActiveSidebar('exec')">
+         <span class="si-icon">📈</span> Executive Dash
       </div>
     `;
   } else if (currentUser.role === 'teacher') {
@@ -527,7 +562,8 @@ function loadFAQ() {
       { q: "How do I record a fee payment?", a: "Go to Fees > Click 'Manage Fees & Receipts' for a student > Click '+ Record Payment'." },
       { q: "How do I print a fee receipt?", a: "In the student's Fee modal, click the 🖨️ icon next to the specific payment in the history table." },
       { q: "How do I add a school holiday?", a: "Go to Calendar > Click '+ Add Event' > Select 'Global School Event'." },
-      { q: "How do I reset a user's password?", a: "Go to Users > Click 'Edit' on the user > Type a new password in the password field and save." }
+      { q: "How do I reset a user's password?", a: "Go to Users > Click 'Reset PW' on the user >  Click OK (Copy the termporary Password and send it to the respective user)." },
+      { q: "Can a user change the password on their own?", a: "No, only admins can reset passwords." }
     ];
   } else if (currentUser.role === 'teacher') {
     faqs = [
@@ -535,7 +571,8 @@ function loadFAQ() {
       { q: "How do I mark attendance?", a: "Open your course > Go to Attendance > Select the date > Mark Present/Absent/Late > Click 'Save Attendance'." },
       { q: "How do I grade an assignment?", a: "Open your course > Go to Assignments > Click 'Submissions' > Enter the marks and feedback > Click 'Save'." },
       { q: "How do I upload lecture notes?", a: "Open your course > Go to Modules > Open a module > Click '+ Add Item' > Upload your file." },
-      { q: "How do I notify my students?", a: "Go to Announcements in your course and click '+ Post Announcement'." }
+      { q: "How do I notify my students?", a: "Go to Announcements in your course and click '+ Post Announcement'." },
+      { q: "Can I change my password on my own?", a: "No, only admins can reset passwords, when you request a password reset, Admin will send you a temporary password > use that to change your password." }
     ];
   } else if (currentUser.role === 'student') {
     faqs = [
@@ -543,7 +580,8 @@ function loadFAQ() {
       { q: "How do I take a quiz?", a: "Open the course > Go to Quizzes > Click 'Take Quiz'. Note the time limit before starting." },
       { q: "Where can I see my grades?", a: "Click on 'Grades' inside your course to see your overall average and individual scores." },
       { q: "How do I check my fee payments?", a: "Click 'Fees' in the main left sidebar to view your payment history and print statements." },
-      { q: "How do I view the course syllabus?", a: "Open the course and click the 'Syllabus' tab." }
+      { q: "How do I view the course syllabus?", a: "Open the course and click the 'Syllabus' tab." },
+      { q: "Can I change my password on my own?", a: "No, only admins can reset passwords, when you request a password reset, Admin will send you a temporary password > use that to change your password." }
     ];
   }
 

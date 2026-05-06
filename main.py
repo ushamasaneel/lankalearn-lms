@@ -476,16 +476,12 @@ def init_db():
                 )
             """)
 
-            # Create fee management tables
+            # Create hybrid fee management tables
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS student_fee_structure (
+                CREATE TABLE IF NOT EXISTS grade_fee_structure (
                     id SERIAL PRIMARY KEY,
-                    student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    monthly_fee REAL NOT NULL DEFAULT 0,
-                    currency TEXT NOT NULL DEFAULT 'LKR',
-                    effective_from TEXT NOT NULL,
-                    notes TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    grade_name TEXT UNIQUE NOT NULL,
+                    monthly_tuition REAL NOT NULL
                 )
             """)
             cur.execute("""
@@ -495,6 +491,7 @@ def init_db():
                     amount REAL NOT NULL,
                     payment_type TEXT NOT NULL DEFAULT 'monthly',
                     payment_for TEXT,
+                    fee_month TEXT,
                     paid_date TEXT NOT NULL,
                     receipt_number TEXT,
                     notes TEXT,
@@ -502,6 +499,9 @@ def init_db():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            # --- THE MAGIC FIX: Force the column to be added safely ---
+            cur.execute("ALTER TABLE student_fee_payments ADD COLUMN IF NOT EXISTS fee_month TEXT;")
             
             # --- THE FIX: Auto-sync all PostgreSQL sequences ---
             # --- THE FIX: Auto-sync all PostgreSQL sequences ---
@@ -816,71 +816,239 @@ def next_admission_number(user=Depends(require_role("admin", "sub_admin", "super
         next_seq = 1
     return {"admission_number": f"LL-{year}-{next_seq:04d}"}
 
+
+
+
+
+
+@app.get("/api/admin/students/{sid}/report-card")
+def get_student_report_card(sid: int, user=Depends(require_role("admin", "super_admin", "sub_admin"))):
+    db = get_db()
+    try:
+        student = query("SELECT id, full_name, admission_number, grade FROM users WHERE id=?", (sid,), one=True, db=db)
+        if not student: raise HTTPException(404, "Student not found")
+
+        # Get all enrolled courses
+        courses = query("""
+            SELECT c.id, c.name 
+            FROM courses c 
+            JOIN enrollments e ON c.id = e.course_id 
+            WHERE e.student_id = ?
+        """, (sid,), db=db)
+
+        # Get assignment totals per course
+        assignments = query("""
+            SELECT a.course_id, SUM(s.grade) as earned, SUM(a.points) as possible
+            FROM submissions s
+            JOIN assignments a ON s.assignment_id = a.id
+            WHERE s.student_id = ? AND s.grade IS NOT NULL
+            GROUP BY a.course_id
+        """, (sid,), db=db)
+        
+        # Get quiz totals per course (quizzes are scaled to 100 points)
+        quizzes = query("""
+            SELECT q.course_id, SUM(qs.grade) as earned, COUNT(q.id) * 100 as possible
+            FROM quiz_submissions qs
+            JOIN quizzes q ON qs.quiz_id = q.id
+            WHERE qs.student_id = ?
+            GROUP BY q.course_id
+        """, (sid,), db=db)
+
+        a_map = {row['course_id']: row for row in assignments}
+        q_map = {row['course_id']: row for row in quizzes}
+
+        report_data = []
+        for c in courses:
+            cid = c["id"]
+            a_earned = a_map.get(cid, {}).get("earned", 0)
+            a_possible = a_map.get(cid, {}).get("possible", 0)
+            
+            q_earned = q_map.get(cid, {}).get("earned", 0)
+            q_possible = q_map.get(cid, {}).get("possible", 0)
+
+            total_earned = a_earned + q_earned
+            total_possible = a_possible + q_possible
+
+            # Calculate grade and automatic remarks
+            if total_possible > 0:
+                pct = round((total_earned / total_possible) * 100)
+                if pct >= 75: remarks = "Outstanding"
+                elif pct >= 65: remarks = "Very Good"
+                elif pct >= 50: remarks = "Good effort"
+                elif pct >= 35: remarks = "Needs improvement"
+                else: remarks = "Weak"
+            else:
+                pct = None
+                remarks = "No graded items yet"
+
+            report_data.append({
+                "course_name": c["name"],
+                "percentage": pct,
+                "remarks": remarks
+            })
+
+        return {"student": student, "results": report_data}
+    finally:
+        DB_POOL.putconn(db)
+
 # ================================================================
 # FEE MANAGEMENT ENDPOINTS
 # ================================================================
 
-@app.get("/api/admin/students/{sid}/fees")
-def get_student_fees(sid: int, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
-    student = query("SELECT id, full_name, admission_number, grade FROM users WHERE id=? AND role='student'", (sid,), one=True)
-    if not student: raise HTTPException(404, "Student not found")
-    structure = query("SELECT * FROM student_fee_structure WHERE student_id=? ORDER BY effective_from DESC LIMIT 1", (sid,), one=True)
-    payments  = query("""
-        SELECT p.*, u.full_name as recorded_by_name
-        FROM student_fee_payments p
-        LEFT JOIN users u ON u.id = p.recorded_by
-        WHERE p.student_id=?
-        ORDER BY p.paid_date DESC
-    """, (sid,))
-    total_paid   = sum(p["amount"] for p in payments)
-    monthly_paid = sum(p["amount"] for p in payments if p["payment_type"] == "monthly")
-    extra_paid   = sum(p["amount"] for p in payments if p["payment_type"] == "extra")
-    return {
-        "student": dict(student),
-        "structure": dict(structure) if structure else None,
-        "payments": [dict(p) for p in payments],
-        "summary": {"total_paid": total_paid, "monthly_paid": monthly_paid, "extra_paid": extra_paid}
-    }
+# ================================================================
+# AUTOMATED BILLING ENGINE
+# ================================================================
 
-@app.post("/api/admin/students/{sid}/fee-structure")
-def set_fee_structure(
-    sid: int,
-    monthly_fee: float = Form(...),
-    effective_from: str = Form(...),
-    notes: str = Form(""),
-    user=Depends(require_role("admin", "sub_admin", "super_admin"))
-):
-    student = query("SELECT id FROM users WHERE id=? AND role='student'", (sid,), one=True)
-    if not student: raise HTTPException(404, "Student not found")
-    execute("INSERT INTO student_fee_structure(student_id, monthly_fee, effective_from, notes) VALUES(?,?,?,?)",
-            (sid, monthly_fee, effective_from, notes))
-    # ADD THIS LINE:
-    log_audit(user["id"], "Set Fee Structure", f"Student ID: {sid} | Monthly Fee: {monthly_fee}")
+@app.get("/api/admin/grade-fees")
+def get_grade_fees(user=Depends(require_role("admin", "super_admin", "sub_admin"))):
+    return query("SELECT * FROM grade_fee_structure ORDER BY grade_name")
+
+@app.post("/api/admin/grade-fees")
+def set_grade_fee(grade_name: str = Form(...), monthly_tuition: float = Form(...), user=Depends(require_role("admin", "super_admin"))):
+    execute("""
+        INSERT INTO grade_fee_structure(grade_name, monthly_tuition) VALUES(?,?)
+        ON CONFLICT(grade_name) DO UPDATE SET monthly_tuition=EXCLUDED.monthly_tuition
+    """, (grade_name, monthly_tuition))
+    log_audit(user["id"], "Updated Master Fee", f"{grade_name} set to {monthly_tuition}")
     return {"ok": True}
 
-@app.post("/api/admin/students/{sid}/fee-payments")
-def add_fee_payment(
-    sid: int,
-    amount: float = Form(...),
-    payment_type: str = Form("monthly"),
-    payment_for: str = Form(""),
-    paid_date: str = Form(...),
-    receipt_number: str = Form(""),
-    notes: str = Form(""),
-    user=Depends(require_role("admin", "sub_admin", "super_admin"))
-):
-    student = query("SELECT id FROM users WHERE id=? AND role='student'", (sid,), one=True)
-    if not student: raise HTTPException(404, "Student not found")
+
+@app.delete("/api/admin/grade-fees/{grade_name}")
+def delete_grade_fee(grade_name: str, user=Depends(require_role("admin", "super_admin"))):
+    execute("DELETE FROM grade_fee_structure WHERE grade_name=?", (grade_name,))
+    return {"ok": True}
+
+@app.get("/hard-reset-fees")
+def hard_reset_fees(user=Depends(require_role("admin", "super_admin", "sub_admin"))):
+    """DANGER: This wipes all fee data and rebuilds the tables perfectly."""
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS student_fee_payments CASCADE;")
+            cur.execute("DROP TABLE IF EXISTS grade_fee_structure CASCADE;")
+            
+            cur.execute("""
+                CREATE TABLE grade_fee_structure (
+                    id SERIAL PRIMARY KEY,
+                    grade_name TEXT UNIQUE NOT NULL,
+                    monthly_tuition REAL NOT NULL
+                );
+            """)
+            cur.execute("""
+                CREATE TABLE student_fee_payments (
+                    id SERIAL PRIMARY KEY,
+                    student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    amount REAL NOT NULL,
+                    payment_type TEXT NOT NULL DEFAULT 'monthly',
+                    payment_for TEXT,
+                    fee_month TEXT, 
+                    paid_date TEXT NOT NULL,
+                    receipt_number TEXT,
+                    notes TEXT,
+                    recorded_by INTEGER REFERENCES users(id),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+        db.commit()
+        return {"status": "SUCCESS: Fee tables completely wiped and rebuilt. The fee_month column is now guaranteed to exist."}
+    except Exception as e:
+        db.rollback()
+        return {"status": "ERROR", "details": str(e)}
+    finally:
+        DB_POOL.putconn(db)
+
+@app.post("/api/admin/invoices/generate")
+def generate_monthly_bills(month: str = Form(...), user=Depends(require_role("admin", "super_admin"))):
+    # 1. Fetch all students with an assigned grade
+    students = query("SELECT id, grade FROM users WHERE role='student' AND grade IS NOT NULL AND grade != ''")
+    
+    # 2. Fetch the master fee lookup table
+    fees = {f["grade_name"]: f["monthly_tuition"] for f in query("SELECT * FROM grade_fee_structure")}
+    
+    count = 0
+    for s in students:
+        if s["grade"] in fees:
+            try:
+                # The UNIQUE constraint prevents double-billing the same month
+                execute("INSERT INTO student_invoices(student_id, invoice_month, total_amount) VALUES(?,?,?)", 
+                        (s["id"], month, fees[s["grade"]]))
+                count += 1
+            except IntegrityError:
+                pass 
+                
+    log_audit(user["id"], "Generated Monthly Bills", f"Month: {month} | Invoices Created: {count}")
+    return {"ok": True, "generated": count}
+
+@app.get("/api/admin/students/{sid}/invoices")
+def get_student_invoices(sid: int, user=Depends(require_role("admin", "super_admin", "sub_admin"))):
+    student = query("SELECT id, full_name, admission_number, grade FROM users WHERE id=?", (sid,), one=True)
+    invoices = query("SELECT * FROM student_invoices WHERE student_id=? ORDER BY invoice_month DESC", (sid,))
+    payments = query("""
+        SELECT p.*, i.invoice_month, u.full_name as recorded_by_name
+        FROM invoice_payments p 
+        JOIN student_invoices i ON p.invoice_id = i.id
+        LEFT JOIN users u ON p.recorded_by = u.id
+        WHERE i.student_id=? ORDER BY p.paid_date DESC
+    """, (sid,))
+    return {"student": student, "invoices": invoices, "payments": payments}
+
+# ================================================================
+# HYBRID FEE MANAGEMENT API
+# ================================================================
+
+@app.get("/api/admin/grade-fees")
+def get_grade_fees(user=Depends(require_role("admin", "super_admin", "sub_admin"))):
+    return query("SELECT * FROM grade_fee_structure ORDER BY grade_name")
+
+@app.post("/api/admin/grade-fees")
+def set_grade_fee(grade_name: str = Form(...), monthly_tuition: float = Form(...), user=Depends(require_role("admin", "super_admin"))):
     execute("""
-        INSERT INTO student_fee_payments(student_id, amount, payment_type, payment_for, paid_date, receipt_number, notes, recorded_by)
-        VALUES(?,?,?,?,?,?,?,?)
-    """, (sid, amount, payment_type, payment_for, paid_date, receipt_number, notes, user["id"]))
-    # ADD THIS LINE:
-    log_audit(user["id"], "Recorded Fee Payment", f"Student ID: {sid} | Amount: {amount} | For: {payment_type}")
+        INSERT INTO grade_fee_structure(grade_name, monthly_tuition) VALUES(?,?)
+        ON CONFLICT(grade_name) DO UPDATE SET monthly_tuition=EXCLUDED.monthly_tuition
+    """, (grade_name, monthly_tuition))
+    return {"ok": True}
+
+@app.get("/api/admin/students/{sid}/fees")
+def get_student_fees_hybrid(sid: int, user=Depends(require_role("admin", "super_admin", "sub_admin"))):
+    student = query("SELECT id, full_name, admission_number, grade FROM users WHERE id=?", (sid,), one=True)
+    if not student: raise HTTPException(404, "Student not found")
+    
+    # Auto-fetch the master fee based on the student's grade
+    master_fee = 0
+    if student["grade"]:
+        fee_record = query("SELECT monthly_tuition FROM grade_fee_structure WHERE grade_name=?", (student["grade"],), one=True)
+        if fee_record: master_fee = fee_record["monthly_tuition"]
+        
+    payments = query("""
+        SELECT p.*, u.full_name as recorded_by_name
+        FROM student_fee_payments p
+        LEFT JOIN users u ON p.recorded_by = u.id
+        WHERE p.student_id=? ORDER BY p.paid_date DESC
+    """, (sid,))
+    
+    return {
+        "student": dict(student),
+        "master_fee": master_fee,
+        "payments": [dict(p) for p in payments]
+    }
+
+@app.post("/api/admin/students/{sid}/fee-payments")
+def add_fee_payment_hybrid(
+    sid: int, amount: float = Form(...), payment_type: str = Form("monthly"),
+    payment_for: str = Form(""), fee_month: str = Form(""), paid_date: str = Form(...),
+    receipt_number: str = Form(""), notes: str = Form(""),
+    user=Depends(require_role("admin", "super_admin", "sub_admin"))
+):
+    execute("""
+        INSERT INTO student_fee_payments(student_id, amount, payment_type, payment_for, fee_month, paid_date, receipt_number, notes, recorded_by)
+        VALUES(?,?,?,?,?,?,?,?,?)
+    """, (sid, amount, payment_type, payment_for, fee_month, paid_date, receipt_number, notes, user["id"]))
+    
+    log_audit(user["id"], "Recorded Fee Payment", f"Student ID: {sid} | Amount: {amount} | Type: {payment_type}")
     return {"ok": True}
 
 @app.delete("/api/admin/fee-payments/{pid}")
-def delete_fee_payment(pid: int, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
+def delete_fee_payment(pid: int, user=Depends(require_role("admin", "super_admin", "sub_admin"))):
     execute("DELETE FROM student_fee_payments WHERE id=?", (pid,))
     return {"ok": True}
 
@@ -2084,7 +2252,35 @@ def fix_database():
             """)
             results.append("OK: student_fee_structure table")
 
-            # ---- Fee payments table ----
+
+            # Add to your main.py database initialization
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS broadcast_alerts (
+                    id SERIAL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    target_audience TEXT NOT NULL CHECK(target_audience IN ('all', 'teachers', 'students', 'parents')),
+                    created_by INTEGER REFERENCES users(id),
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
+            # Add expiry column to existing broadcast table
+            cur.execute("ALTER TABLE broadcast_alerts ADD COLUMN IF NOT EXISTS expires_at TEXT;")
+
+            
+
+
+        
+            ## ---- HYBRID FEE MANAGEMENT TABLES ----
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS grade_fee_structure (
+                    id SERIAL PRIMARY KEY,
+                    grade_name TEXT UNIQUE NOT NULL,
+                    monthly_tuition REAL NOT NULL
+                );
+            """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS student_fee_payments (
                     id SERIAL PRIMARY KEY,
@@ -2092,6 +2288,7 @@ def fix_database():
                     amount REAL NOT NULL,
                     payment_type TEXT NOT NULL DEFAULT 'monthly',
                     payment_for TEXT,
+                    fee_month TEXT, 
                     paid_date TEXT NOT NULL,
                     receipt_number TEXT,
                     notes TEXT,
@@ -2099,7 +2296,43 @@ def fix_database():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
-            results.append("OK: student_fee_payments table")
+            # Safely add the column if upgrading an older database
+            cur.execute("ALTER TABLE student_fee_payments ADD COLUMN IF NOT EXISTS fee_month TEXT;")
+            results.append("OK: Hybrid Fee tables verified")
+
+
+            # ---- NEW BILLING ENGINE TABLES ----
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS grade_fee_structure (
+                    id SERIAL PRIMARY KEY,
+                    grade_name TEXT UNIQUE NOT NULL,
+                    monthly_tuition REAL NOT NULL,
+                    term_facility_fee REAL DEFAULT 0,
+                    annual_admission_fee REAL DEFAULT 0
+                );
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS student_invoices (
+                    id SERIAL PRIMARY KEY,
+                    student_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    invoice_month TEXT,
+                    total_amount REAL NOT NULL,
+                    amount_paid REAL DEFAULT 0,
+                    status TEXT DEFAULT 'unpaid',
+                    UNIQUE(student_id, invoice_month) 
+                );
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS invoice_payments (
+                    id SERIAL PRIMARY KEY,
+                    invoice_id INTEGER REFERENCES student_invoices(id) ON DELETE CASCADE,
+                    amount REAL NOT NULL,
+                    paid_date TEXT NOT NULL,
+                    receipt_number TEXT,
+                    recorded_by INTEGER REFERENCES users(id)
+                );
+            """)
+            results.append("OK: Automated Billing Engine tables created")
 
             # ---- Calendar events table (THE UPGRADE) ----
             cur.execute("""
@@ -2124,6 +2357,21 @@ def fix_database():
             cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS has_time INTEGER DEFAULT 0;")
             
             results.append("OK: calendar_events upgraded for multi-day support")
+
+# Force add the column safely
+            try:
+                cur.execute("ALTER TABLE student_fee_payments ADD COLUMN fee_month TEXT;")
+                results.append("OK: Forced fee_month column addition")
+            except psycopg2.errors.DuplicateColumn:
+                db.rollback() # It already exists, ignore
+                results.append("SKIP: fee_month already exists")
+            except Exception as e:
+                db.rollback()
+                results.append(f"ERROR adding fee_month: {e}")
+                
+       
+
+
 
         db.commit()
         return {"status": "All done. Restart not needed — go back to the dashboard.", "details": results}
@@ -2197,6 +2445,83 @@ def get_audit_logs(user=Depends(require_role("admin", "super_admin"))):
     """)        
 
 
+
+@app.get("/api/admin/executive-dashboard")
+def get_executive_dashboard(user=Depends(require_role("admin", "super_admin", "sub_admin"))):
+    db = get_db()
+    try:
+        # 1. Demographics: Students per grade
+        demographics = query("""
+            SELECT COALESCE(grade, 'Unassigned') as grade, COUNT(id) as student_count
+            FROM users WHERE role='student'
+            GROUP BY grade ORDER BY grade
+        """, db=db)
+
+        # 2. Financials: Revenue by grade
+        financials = query("""
+            SELECT 
+                COALESCE(u.grade, 'Unassigned') as grade, 
+                SUM(p.amount) as collected
+            FROM student_fee_payments p
+            JOIN users u ON p.student_id = u.id
+            WHERE p.payment_type = 'monthly' AND p.fee_month = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
+            GROUP BY u.grade
+            ORDER BY u.grade
+        """, db=db)
+        
+        # 3. Expected Revenue lookup
+        master_fees = query("SELECT grade_name, monthly_tuition FROM grade_fee_structure", db=db)
+        fee_map = {f["grade_name"]: f["monthly_tuition"] for f in master_fees}
+        
+        # Combine expected and collected
+        financial_data = []
+        for d in demographics:
+            g = d["grade"]
+            expected = d["student_count"] * fee_map.get(g, 0)
+            # Find collected for this grade
+            coll_row = next((f for f in financials if f["grade"] == g), None)
+            collected = coll_row["collected"] if coll_row and coll_row["collected"] else 0
+            
+            if expected > 0 or collected > 0:
+                financial_data.append({
+                    "grade": g,
+                    "expected": expected,
+                    "collected": collected,
+                    "deficit": expected - collected
+                })
+
+        # 4. Teacher Workloads & Course Performance
+        teachers = query("""
+            SELECT 
+                u.id, u.full_name as teacher_name, c.name as course_name,
+                (SELECT COUNT(*) FROM enrollments e WHERE e.course_id = c.id) as student_count,
+                (SELECT AVG(grade) FROM submissions s WHERE s.assignment_id IN (SELECT id FROM assignments WHERE course_id=c.id)) as avg_grade
+            FROM users u
+            JOIN courses c ON c.teacher_id = u.id
+            WHERE u.role = 'teacher'
+            ORDER BY u.full_name
+        """, db=db)
+        
+        # Group courses by teacher
+        teacher_map = {}
+        for t in teachers:
+            name = t["teacher_name"]
+            if name not in teacher_map:
+                teacher_map[name] = []
+            teacher_map[name].append({
+                "course": t["course_name"], 
+                "students": t["student_count"], 
+                "avg": round(t["avg_grade"], 1) if t["avg_grade"] else None
+            })
+
+        return {
+            "demographics": demographics,
+            "financials": financial_data,
+            "teachers": [{"name": k, "courses": v} for k, v in teacher_map.items()]
+        }
+    finally:
+        DB_POOL.putconn(db)
+
 # --- BULK ENROLLMENT & STUDENT FEES ---
 @app.post("/api/admin/courses/{cid}/enroll/bulk")
 async def bulk_enroll(cid: int, request: Request, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
@@ -2222,7 +2547,53 @@ def get_my_fees(user=Depends(require_role("student"))):
     payments = query("SELECT * FROM student_fee_payments WHERE student_id=? ORDER BY paid_date DESC", (sid,))
     return {"structure": dict(structure) if structure else None, "payments": [dict(p) for p in payments]}        
 
+
+
+
+
+# 1. Replace the POST route
+@app.post("/api/admin/broadcasts")
+def create_broadcast(title: str = Form(...), message: str = Form(...), target: str = Form("all"), hours: int = Form(24), user=Depends(require_role("admin", "super_admin"))):
+    execute("UPDATE broadcast_alerts SET is_active = FALSE")
+    
+    # Calculate expiry time based on the hours provided
+    # Change this line inside create_broadcast
+    expires_at = (datetime.utcnow() + timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    
+    execute("INSERT INTO broadcast_alerts(title, message, target_audience, created_by, expires_at) VALUES(?,?,?,?,?)", 
+            (title, message, target, user["id"], expires_at))
+    return {"ok": True}
+
+# 2. Replace the GET route
+@app.get("/api/broadcasts/active")
+def get_active_broadcast(user=Depends(require_user)):
+    role_target = 'students' if user['role'] == 'student' else 'teachers' if user['role'] == 'teacher' else 'all'
+    
+    # Now selects the ID and checks if current time is past expires_at
+    return query("""
+        SELECT id, title, message, target_audience 
+        FROM broadcast_alerts 
+        WHERE is_active = TRUE 
+          AND (target_audience = 'all' OR target_audience = ?)
+          AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP::text)
+        ORDER BY created_at DESC LIMIT 1
+    """, (role_target,), one=True)
+
+
+
+
+@app.delete("/api/admin/broadcasts/active")
+def clear_active_broadcast(user=Depends(require_role("admin", "super_admin"))):
+    # Instantly turn off all active broadcasts
+    execute("UPDATE broadcast_alerts SET is_active = FALSE")
+    
+    # Optional: Log the action
+    log_audit(user["id"], "Cleared Broadcast Alert", "Manually deactivated active alerts.")
+    return {"ok": True}
 # ---------------------------------------------------------------------------
+
+
+
 # LankaBot AI Assistant (Safe Read-Only)
 # ---------------------------------------------------------------------------
 

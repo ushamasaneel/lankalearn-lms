@@ -1,5 +1,5 @@
 /* ============================================================
-   admin.js — Admin dashboard, users, courses, enrollments
+   admin.js — Admin dashboard, users, courses, enrollments, fees
    ============================================================ */
 
 async function loadAdminDashboard() {
@@ -14,9 +14,15 @@ async function loadAdminDashboard() {
   const recentUsers = users.slice(-5).reverse();
 
   setContent(`
-    <div class="page-header">
-      <h1>🏠 Admin Dashboard</h1>
-      <p>Welcome back, ${escHtml(currentUser.full_name)}. Here's an overview of LankaLearn.</p>
+    <div class="page-header page-header-row">
+      <div>
+        <h1>🏠 Admin Dashboard</h1>
+        <p>Welcome back, ${escHtml(currentUser.full_name)}. Here's an overview of LankaLearn.</p>
+      </div>
+      <div class="flex gap-8">
+        <button class="btn btn-secondary" onclick="clearActiveBroadcast()">🛑 Clear Alert</button>
+        <button class="btn btn-danger" onclick="showBroadcastModal()">🚨 Send School Alert</button>
+      </div>
     </div>
 
     <div class="stat-grid">
@@ -79,8 +85,6 @@ async function loadAdminDashboard() {
     </div>
   `);
 
-  // --- NEW: Add Audit Logs if user is a full Admin ---
-// --- UPGRADED: Advanced Audit Logs with Dropdown Filters ---
   if (currentUser.role === 'admin' || currentUser.role === 'super_admin') {
     const logsContainer = document.createElement('div');
     logsContainer.innerHTML = `
@@ -160,9 +164,268 @@ async function loadAdminDashboard() {
   }
 }
 
-// ---- Users ----
-// activeTab: 'tab-teachers' | 'tab-students' | 'tab-admins'
-// activeTab: 'tab-teachers' | 'tab-students' | 'tab-admins' | 'tab-subadmins'
+async function loadExecutiveDashboard() {
+    setPageTitle('Executive Dashboard');
+    setActiveSidebar('exec');
+    setContent('<div class="loading-state"><div class="spinner"></div></div>');
+    
+    const data = await api('/api/admin/executive-dashboard');
+    const fmt = n => `LKR ${Number(n).toLocaleString('en-LK')}`;
+    
+    // Calculate School-Wide Totals
+    let totalExpected = 0, totalCollected = 0, totalStudents = 0;
+    data.financials.forEach(f => { totalExpected += f.expected; totalCollected += f.collected; });
+    data.demographics.forEach(d => { totalStudents += d.student_count; });
+    const collectionPct = totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0;
+
+    // Generate INTERACTIVE Demographic HTML Bars
+    const maxStudents = Math.max(...data.demographics.map(d => d.student_count), 1);
+    const demoHtml = data.demographics.map(d => {
+        const pct = (d.student_count / maxStudents) * 100;
+        return `
+            <div style="margin-bottom:14px; cursor:pointer; padding:6px; border-radius:6px; transition:all 0.2s; border:1px solid transparent;" 
+                 onmouseover="this.style.background='#f8fafc'; this.style.borderColor='#e2e8f0';" 
+                 onmouseout="this.style.background='transparent'; this.style.borderColor='transparent';"
+                 onclick="execShowGradeStudents('${escHtml(d.grade)}')">
+                <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:700; margin-bottom:6px; color:var(--text);">
+                    <span>${escHtml(d.grade)}</span>
+                    <span style="color:var(--primary);">${d.student_count} Students <span style="font-size:10px; margin-left:4px;">▶</span></span>
+                </div>
+                <div style="width:100%; background:#e2e8f0; border-radius:6px; height:14px; overflow:hidden;">
+                    <div style="width:${pct}%; background:linear-gradient(90deg, var(--primary-dark), var(--primary-mid)); height:100%; border-radius:6px;"></div>
+                </div>
+            </div>`;
+    }).join('');
+
+    // Generate Financial HTML Bars with Drilldown
+    const maxFin = Math.max(...data.financials.map(f => Math.max(f.expected, f.collected)), 1);
+    const finHtml = data.financials.map(f => {
+        const expPct = (f.expected / maxFin) * 100;
+        const colPct = (f.collected / maxFin) * 100;
+        return `
+            <div style="margin-bottom:16px; cursor:pointer; padding:8px; border-radius:8px; transition:all 0.2s;" 
+                 onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'"
+                 onclick="execShowFinancialDrilldown('${escHtml(f.grade)}')">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <div style="font-size:12px; font-weight:700;">${escHtml(f.grade)}</div>
+                    <span style="font-size:10px; color:var(--primary); font-weight:600;">View Arrears List ▶</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                    <div style="width:60px; font-size:10px; color:var(--text-muted);">Expected</div>
+                    <div style="flex:1; background:#f1f5f9; height:8px; border-radius:4px; overflow:hidden;">
+                        <div style="width:${expPct}%; background:#94a3b8; height:100%;"></div>
+                    </div>
+                    <div style="width:80px; text-align:right; font-size:11px;">${fmt(f.expected)}</div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <div style="width:60px; font-size:10px; color:var(--text-muted);">Collected</div>
+                    <div style="flex:1; background:#f1f5f9; height:8px; border-radius:4px; overflow:hidden;">
+                        <div style="width:${colPct}%; background:#16a34a; height:100%;"></div>
+                    </div>
+                    <div style="width:80px; text-align:right; font-size:11px; font-weight:700; color:#15803d;">${fmt(f.collected)}</div>
+                </div>
+            </div>`;
+    }).join('') || '<p class="text-muted">No financial data for current month.</p>';
+
+    window._execTeachers = data.teachers;
+
+    setContent(`
+        <div class="page-header">
+            <h1>📈 Executive Overview</h1>
+            <p>School-wide analytics for administration.</p>
+        </div>
+        <div class="stat-grid" style="margin-bottom:24px;">
+            <div class="stat-card" style="background:#f8fafc; border-bottom:3px solid var(--primary);">
+                <div class="stat-label">Total Enrollment</div>
+                <div class="stat-value">${totalStudents}</div>
+            </div>
+            <div class="stat-card" style="background:#f8fafc; border-bottom:3px solid #16a34a;">
+                <div class="stat-label">Monthly Collection Rate</div>
+                <div class="stat-value text-green">${collectionPct}%</div>
+            </div>
+            <div class="stat-card" style="background:#f8fafc; border-bottom:3px solid #dc2626;">
+                <div class="stat-label">Monthly Deficit</div>
+                <div class="stat-value text-red">${fmt(totalExpected - totalCollected)}</div>
+            </div>
+        </div>
+        <div class="form-row form-row-2">
+            <div class="card mb-24">
+                <div class="card-header"><span class="card-title">📊 Demographics (Click a Grade)</span></div>
+                <div class="card-body" style="padding:16px 20px;">${demoHtml}</div>
+            </div>
+            <div class="card mb-24">
+                <div class="card-header"><span class="card-title">💰 Financial Health (Click for Arrears)</span></div>
+                <div class="card-body">${finHtml}</div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><span class="card-title">👨‍🏫 Teacher Workload & Performance</span></div>
+            <div class="card-body" style="display:flex; gap:0; flex-wrap:wrap; padding:0;">
+                <div style="flex:1; min-width:280px; border-right:1px solid var(--border); background:#fafafa;">
+                    ${data.teachers.map((t, idx) => `
+                        <div onclick="execShowTeacher(${idx})" style="padding:16px 20px; border-bottom:1px solid var(--border); cursor:pointer; transition:all 0.2s; display:flex; justify-content:space-between; align-items:center;" onmouseover="this.style.background='white'; this.style.paddingLeft='24px';" onmouseout="this.style.background='transparent'; this.style.paddingLeft='20px';">
+                            <div>
+                                <div style="font-weight:700; color:var(--primary-dark); font-size:14px;">${escHtml(t.name)}</div>
+                                <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">${t.courses.length} Assigned Course(s)</div>
+                            </div>
+                            <span style="color:var(--text-light); font-size:12px;">▶</span>
+                        </div>
+                    `).join('')}
+                    ${!data.teachers.length ? '<div style="padding:20px;" class="text-muted">No teachers assigned.</div>' : ''}
+                </div>
+                <div id="execTeacherDetails" style="flex:2; min-width:300px; padding:24px; background:white;">
+                    <div class="empty-state" style="margin-top:20px;"><div class="empty-icon" style="font-size:32px;">👈</div><p>Select a teacher to view details.</p></div>
+                </div>
+            </div>
+        </div>
+    `);
+
+    // --- Helper Functions ---
+    window.execShowTeacher = (idx) => {
+        const t = window._execTeachers[idx];
+        const container = document.getElementById('execTeacherDetails');
+        let html = `<div style="display:flex; align-items:center; gap:12px; margin-bottom:20px; border-bottom:2px solid var(--primary-light); padding-bottom:12px;"><div class="user-avatar" style="width:48px;height:48px;font-size:20px;">${t.name.charAt(0)}</div><div><h3 style="margin:0; color:var(--text); font-size:18px;">${escHtml(t.name)}</h3><div class="text-sm text-muted">Academic Performance</div></div></div>`;
+        html += `<table style="width:100%; font-size:13.5px; border-collapse:collapse;"><thead><tr style="background:#f8fafc; border-bottom:2px solid var(--border);"><th style="padding:12px 10px;text-align:left;">Course</th><th style="padding:12px 10px;text-align:center;">Students</th><th style="padding:12px 10px;text-align:center;">Avg. Grade</th></tr></thead><tbody>`;
+        t.courses.forEach(c => {
+            const gradeBadge = c.avg !== null ? `<span class="badge ${c.avg >= 75 ? 'badge-green' : c.avg >= 50 ? 'badge-blue' : 'badge-red'}">${c.avg}%</span>` : '<span class="text-muted">N/A</span>';
+            html += `<tr><td style="padding:14px 10px; border-bottom:1px solid #f1f5f9;"><strong>${escHtml(c.course)}</strong></td><td style="padding:14px 10px; border-bottom:1px solid #f1f5f9; text-align:center;">${c.students}</td><td style="padding:14px 10px; border-bottom:1px solid #f1f5f9; text-align:center;">${gradeBadge}</td></tr>`;
+        });
+        html += `</tbody></table>`;
+        container.innerHTML = html;
+    };
+
+    window.execShowGradeStudents = async (gradeName) => {
+        openModal(`Students in ${gradeName}`, '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
+        try {
+            const users = await api('/api/admin/users');
+            const students = users.filter(u => u.role === 'student' && (u.grade === gradeName || (gradeName === 'Unassigned' && !u.grade)));
+            let html = `<div class="table-wrapper"><table style="width:100%; font-size:13.5px; border-collapse:collapse;"><thead><tr style="background:#f8fafc; border-bottom:2px solid var(--border);"><th style="padding:12px 16px;text-align:left;">Name</th><th style="padding:12px 16px;text-align:left;">Adm No.</th><th style="padding:12px 16px;text-align:center;">Actions</th></tr></thead><tbody>`;
+            if (!students.length) html += `<tr><td colspan="3" class="text-center text-muted" style="padding:30px;">No students found.</td></tr>`;
+            else {
+                students.forEach(s => {
+                    html += `<tr onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'"><td style="padding:14px 16px; border-bottom:1px solid #f1f5f9;"><strong>${escHtml(s.full_name)}</strong><br><span class="text-muted text-sm">${escHtml(s.username)}</span></td><td style="padding:14px 16px; border-bottom:1px solid #f1f5f9;">${s.admission_number ? `<code class="adm-number">${escHtml(s.admission_number)}</code>` : '—'}</td><td style="padding:14px 16px; border-bottom:1px solid #f1f5f9; text-align:center;"><div class="flex gap-8 flex-center"><button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${s.id})">👤 Profile</button><button class="btn btn-success btn-sm" onclick="window.openPaymentPortal(${s.id}, '${escHtml(s.full_name)}')">💰 Fees</button><button class="btn btn-secondary btn-sm" onclick="window.printTermReportCard(${s.id}, '${escHtml(s.full_name)}')">📄 Report</button></div></td></tr>`;
+                });
+            }
+            html += `</tbody></table></div>`;
+            document.getElementById('modalBody').innerHTML = html;
+        } catch (e) { document.getElementById('modalBody').innerHTML = `<div class="alert alert-error">Error: ${e.message}</div>`; }
+    };
+
+    window.execShowFinancialDrilldown = async (gradeName) => {
+        const currentMonth = new Date().toISOString().slice(0, 7);
+        openModal(`Arrears Report: ${gradeName} (${currentMonth})`, '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
+        try {
+            const [users, gradeFees] = await Promise.all([api('/api/admin/users'), api('/api/admin/grade-fees')]);
+            const students = users.filter(u => u.role === 'student' && (u.grade === gradeName || (gradeName === 'Unassigned' && !u.grade)));
+            const masterFee = gradeFees.find(f => f.grade_name === gradeName)?.monthly_tuition || 0;
+            let html = `<div style="display:flex; gap:16px; margin-bottom:20px; background:#f1f5f9; padding:15px; border-radius:10px;"><div style="flex:1; text-align:center; border-right:1px solid #cbd5e1;"><div style="font-size:10px; font-weight:700;">Standard Fee</div><div style="font-size:18px; font-weight:800;">LKR ${masterFee.toLocaleString()}</div></div><div style="flex:1; text-align:center;"><div style="font-size:10px; font-weight:700;">Target Students</div><div style="font-size:18px; font-weight:800;">${students.length}</div></div></div><div class="table-wrapper"><table style="width:100%; font-size:13px; border-collapse:collapse;"><thead><tr style="background:#f8fafc; border-bottom:2px solid var(--border);"><th style="padding:12px 16px; text-align:left;">Student</th><th style="padding:12px 16px; text-align:center;">Status</th><th style="padding:12px 16px; text-align:right;">Action</th></tr></thead><tbody>`;
+            
+            for (const s of students) {
+                const feeData = await api(`/api/admin/students/${s.id}/fees`);
+                const paid = feeData.payments.find(p => p.payment_type === 'monthly' && p.fee_month === currentMonth);
+                const status = paid ? `<span class="badge badge-green">✅ PAID</span>` : `<span class="badge badge-red">❌ UNPAID</span>`;
+                html += `<tr><td style="padding:12px 16px; border-bottom:1px solid #f1f5f9;"><strong>${escHtml(s.full_name)}</strong><br><span style="font-size:11px;">Adm: ${escHtml(s.admission_number || 'N/A')}</span></td><td style="padding:12px 16px; border-bottom:1px solid #f1f5f9; text-align:center;">${status}</td><td style="padding:12px 16px; border-bottom:1px solid #f1f5f9; text-align:right;"><button class="btn btn-success btn-xs" onclick="window.openPaymentPortal(${s.id}, '${escHtml(s.full_name)}')">💰 Record</button></td></tr>`;
+            }
+            html += `</tbody></table></div>`;
+            document.getElementById('modalBody').innerHTML = html;
+        } catch (e) { document.getElementById('modalBody').innerHTML = `<div class="alert alert-error">Error: ${e.message}</div>`; }
+    };
+}
+
+    // Helper to render Teacher Details on click
+    window.execShowTeacher = (idx) => {
+        const t = window._execTeachers[idx];
+        const container = document.getElementById('execTeacherDetails');
+        
+        let html = `
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px; border-bottom:2px solid var(--primary-light); padding-bottom:12px;">
+                <div class="user-avatar" style="width:48px;height:48px;font-size:20px;">${t.name.charAt(0)}</div>
+                <div>
+                    <h3 style="margin:0; color:var(--text); font-size:18px;">${escHtml(t.name)}</h3>
+                    <div class="text-sm text-muted">Academic Performance Overview</div>
+                </div>
+            </div>
+        `;
+        
+        html += `<table style="width:100%; font-size:13.5px; border-collapse:collapse;">
+            <thead><tr style="background:#f8fafc; border-bottom:2px solid var(--border);"><th style="padding:12px 10px;text-align:left;">Assigned Course</th><th style="padding:12px 10px;text-align:center;">Students Enrolled</th><th style="padding:12px 10px;text-align:center;">Avg. Grade</th></tr></thead>
+            <tbody>`;
+            
+        t.courses.forEach(c => {
+            const gradeBadge = c.avg !== null 
+                ? `<span class="badge ${c.avg >= 75 ? 'badge-green' : c.avg >= 50 ? 'badge-blue' : 'badge-red'}">${c.avg}%</span>` 
+                : '<span class="text-muted">No grades yet</span>';
+                
+            html += `<tr>
+                <td style="padding:14px 10px; border-bottom:1px solid #f1f5f9;"><strong>${escHtml(c.course)}</strong></td>
+                <td style="padding:14px 10px; border-bottom:1px solid #f1f5f9; text-align:center;">${c.students}</td>
+                <td style="padding:14px 10px; border-bottom:1px solid #f1f5f9; text-align:center;">${gradeBadge}</td>
+            </tr>`;
+        });
+        
+        html += `</tbody></table>`;
+        container.innerHTML = html;
+    };
+
+    // Helper to render Student Drilldown on click
+    window.execShowGradeStudents = async (gradeName) => {
+        openModal(`Students in ${gradeName}`, '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
+        try {
+            // Fetch fresh users to ensure we have the latest list
+            const users = await api('/api/admin/users');
+            const students = users.filter(u => u.role === 'student' && (u.grade === gradeName || (gradeName === 'Unassigned' && !u.grade)));
+            
+            let html = `
+            <div class="table-wrapper">
+                <table style="width:100%; font-size:13.5px; border-collapse:collapse;">
+                    <thead>
+                        <tr style="background:#f8fafc; border-bottom:2px solid var(--border);">
+                            <th style="padding:12px 16px;text-align:left;">Student Name</th>
+                            <th style="padding:12px 16px;text-align:left;">Admission No.</th>
+                            <th style="padding:12px 16px;text-align:center;">Quick Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            if (students.length === 0) {
+                html += `<tr><td colspan="3" class="text-center text-muted" style="padding:30px;">No students found in this grade.</td></tr>`;
+            } else {
+                students.forEach(s => {
+                    html += `
+                    <tr style="transition:background 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                        <td style="padding:14px 16px; border-bottom:1px solid #f1f5f9;">
+                            <strong>${escHtml(s.full_name)}</strong><br>
+                            <span class="text-muted text-sm">${escHtml(s.username)}</span>
+                        </td>
+                        <td style="padding:14px 16px; border-bottom:1px solid #f1f5f9;">
+                            ${s.admission_number ? `<code class="adm-number">${escHtml(s.admission_number)}</code>` : '<span class="text-muted">—</span>'}
+                        </td>
+                        <td style="padding:14px 16px; border-bottom:1px solid #f1f5f9; text-align:center;">
+                            <div class="flex gap-8 flex-center">
+                                <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${s.id})" title="Print Profile">👤 Profile</button>
+                                <button class="btn btn-success btn-sm" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="window.openPaymentPortal(${s.id}, '${escHtml(s.full_name)}')">💰 Fees</button>
+                                <button class="btn btn-secondary btn-sm" onclick="window.printTermReportCard(${s.id}, '${escHtml(s.full_name)}')">📄 Report Card</button>
+                            </div>
+                        </td>
+                    </tr>
+                    `;
+                });
+            }
+            
+            html += `</tbody></table></div>`;
+            document.getElementById('modalBody').innerHTML = html;
+            
+        } catch (e) {
+            document.getElementById('modalBody').innerHTML = `<div class="alert alert-error">Failed to load students: ${escHtml(e.message)}</div>`;
+        }
+    };
+
+
+// ================================================================
+// USERS SECTION
+// ================================================================
+
 async function loadAdminUsers(activeTab) {
   if (!activeTab) {
     const cur = document.querySelector('.tab-panel[style*="display: block"], .tab-panel.active:not([style*="display: none"])');
@@ -179,9 +442,8 @@ async function loadAdminUsers(activeTab) {
   const teachers  = users.filter(u => u.role === 'teacher');
   const students  = users.filter(u => u.role === 'student');
   const admins    = users.filter(u => u.role === 'admin' || u.role === 'super_admin');
-  const subAdmins = users.filter(u => u.role === 'sub_admin'); // NEW: Filter out sub admins
+  const subAdmins = users.filter(u => u.role === 'sub_admin');
 
-  // ---- Teacher table with mass-select ----
   function teacherTable(list) {
     if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
     return `
@@ -225,7 +487,7 @@ async function loadAdminUsers(activeTab) {
               <td>
                 ${isYou ? '<span class="text-muted text-sm">You</span>' : `
                   <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'teacher')">Edit</button>
-                  <button class="btn btn-secondary btn-sm" onclick="printUserProfile(${u.id})" title="Print Profile">🖨️</button>
+                  <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${u.id})" title="Print Profile">🖨️</button>
                   <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')">Reset PW</button>
                   <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
                 `}
@@ -236,11 +498,9 @@ async function loadAdminUsers(activeTab) {
       </table>`;
   }
 
-  // ---- Student table with mass-select + grade filter ----
   function studentTable(list) {
     if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
 
-    // Collect unique grades
     const grades = [...new Set(list.map(u => u.grade || 'Unassigned'))].sort((a, b) => {
       if (a === 'Unassigned') return 1;
       if (b === 'Unassigned') return -1;
@@ -307,8 +567,9 @@ async function loadAdminUsers(activeTab) {
               </td>
               <td>
                 <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'student')">Edit</button>
-                <button class="btn btn-sm" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="showStudentFees(${u.id},'${escHtml(u.full_name)}')">💰 Fees</button>
-                <button class="btn btn-secondary btn-sm" onclick="printUserProfile(${u.id})" title="Print Profile">🖨️</button>
+                <button class="btn btn-sm" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="window.openPaymentPortal(${u.id},'${escHtml(u.full_name)}')">💰 Fees</button>
+                <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${u.id})" title="Print Profile">🖨️</button>
+                <button class="btn btn-secondary btn-sm" onclick="window.printTermReportCard(${u.id}, '${escHtml(u.full_name)}')">📄 Report Card</button>
                 <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')">Reset PW</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
               </td>
@@ -318,7 +579,7 @@ async function loadAdminUsers(activeTab) {
       </table>`;
   }
 
-function adminTable(list, roleLabel) {
+  function adminTable(list, roleLabel) {
     if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
     return `<table><thead><tr><th>Profile</th><th>Details</th><th>Contact / Extra</th><th>Actions</th></tr></thead>
     <tbody>${list.map(u => {
@@ -382,13 +643,11 @@ function adminTable(list, roleLabel) {
     </div>
   `);
 
-  // Restore whichever tab was active (or default to teachers)
   const tabToShow = document.getElementById(activeTab) ? activeTab : 'tab-teachers';
   const btnToActivate = document.getElementById('tbtn-' + tabToShow);
   if (btnToActivate) switchTab(btnToActivate, tabToShow);
 }
 
-// Update the roleToTab helper so it remembers the new tabs!
 function roleToTab(role) {
   return { teacher: 'tab-teachers', student: 'tab-students', sub_admin: 'tab-subadmins', admin: 'tab-admins', super_admin: 'tab-admins' }[role] || 'tab-teachers';
 }
@@ -400,7 +659,6 @@ function switchTab(btn, tabId) {
   document.getElementById(tabId).style.display = 'block';
 }
 
-// ---- Mass-select helpers ----
 function toggleSelectAll(role, checked) {
   document.querySelectorAll(`.${role}-check`).forEach(cb => {
     const row = cb.closest('tr');
@@ -417,7 +675,6 @@ function onRowCheck(role) {
   const count = document.getElementById(`${role}SelCount`);
   if (bar) bar.style.display = checked.length ? 'flex' : 'none';
   if (count) count.textContent = checked.length;
-  // Sync header checkbox
   const all = document.querySelectorAll(`.${role}-check`);
   const visible = [...all].filter(cb => cb.closest('tr').style.display !== 'none');
   const selectAll = document.getElementById(`${role}SelectAll`);
@@ -453,18 +710,8 @@ async function bulkDelete(role) {
   loadAdminUsers(roleToTab(role));
 }
 
-// ---- Grade filter ----
 function filterStudentsByGrade() {
-  const filter = document.getElementById('gradeFilter')?.value || 'All';
-  document.querySelectorAll('#studentTableBody tr').forEach(row => {
-    const grade = row.dataset.grade || 'Unassigned';
-    row.style.display = (filter === 'All' || grade === filter) ? '' : 'none';
-  });
-  // Uncheck hidden rows and refresh toolbar
-  document.querySelectorAll('.student-check').forEach(cb => {
-    if (cb.closest('tr').style.display === 'none') cb.checked = false;
-  });
-  onRowCheck('student');
+  filterStudentsSearch();
 }
 
 const GRADE_OPTIONS = [
@@ -507,7 +754,6 @@ function showCreateUser(role) {
     } catch (e) { showToast(e.message, 'error'); }
   }, `Create ${roleTitle}`));
 
-  // Auto-suggest next admission number for students
   if (role === 'student') {
     api('/api/admin/next-admission').then(res => {
       const field = document.querySelector('[name="admission_number"]');
@@ -546,7 +792,6 @@ function showEditUser(id, roleLabel) {
 
 async function deleteUser(id, name) {
   if (!confirm(`Delete user "${name}"? This cannot be undone.`)) return;
-  // Remember which tab we're on before the DOM is rebuilt
   const cur = document.querySelector('.tab-panel[style*="display: block"], .tab-panel.active:not([style*="display: none"])');
   const activeTab = cur ? cur.id : 'tab-teachers';
   try {
@@ -556,7 +801,10 @@ async function deleteUser(id, name) {
   } catch (e) { showToast(e.message, 'error'); }
 }
 
-// ---- Courses ----
+// ================================================================
+// COURSES SECTION
+// ================================================================
+
 async function loadAdminCourses() {
   setPageTitle('Courses');
   setActiveSidebar('courses');
@@ -567,7 +815,6 @@ async function loadAdminCourses() {
     api('/api/admin/teachers')
   ]);
 
-  // Store in memory so the Edit Modal can read the current data easily
   window._adminCourses = courses;
   window._adminTeachers = teachers;
 
@@ -620,10 +867,6 @@ function showEditCourse(id) {
       loadAdminCourses();
     } catch (e) { showToast(e.message, 'error'); }
   }, 'Save Changes'));
-
-
-  // Store teachers for modal
-  window._adminTeachers = teachers;
 }
 
 function showCreateCourse() {
@@ -718,25 +961,8 @@ async function manageEnrollments(courseId, courseName) {
   openModal(`Students — ${courseName}`, html, 'modal-box-lg');
 }
 
-async function enrollStudent(courseId, studentId, studentName, courseName) {
-  try {
-    const fd = buildForm({ student_id: studentId });
-    await apiPost(`/api/admin/courses/${courseId}/enroll`, fd);
-    showToast(`${studentName} enrolled!`, 'success');
-    manageEnrollments(courseId, courseName);
-  } catch (e) { showToast(e.message, 'error'); }
-}
-
-async function unenrollStudent(courseId, studentId, studentName, courseName) {
-  if (!confirm(`Remove ${studentName} from this course?`)) return;
-  try {
-    await apiDelete(`/api/admin/courses/${courseId}/enroll/${studentId}`);
-    showToast(`${studentName} removed`, 'success');
-    manageEnrollments(courseId, courseName);
-  } catch (e) { showToast(e.message, 'error'); }
-}
 // ================================================================
-// SEARCH
+// SEARCH HELPERS
 // ================================================================
 
 function filterTeachersSearch() {
@@ -761,312 +987,8 @@ function filterStudentsSearch() {
   onRowCheck('student');
 }
 
-// Also wire grade filter through search so both filters combine
-function filterStudentsByGrade() {
-  filterStudentsSearch();
-}
-
 // ================================================================
-// STUDENT FEE MANAGEMENT
-// ================================================================
-
-async function showStudentFees(studentId, studentName) {
-  openModal(`💰 Fees — ${studentName}`, '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
-  await refreshFeeModal(studentId);
-}
-
-async function refreshFeeModal(studentId) {
-  let data;
-  try { data = await api(`/api/admin/students/${studentId}/fees`); }
-  catch (e) { document.getElementById('modalBody').innerHTML = `<p class="text-muted">Error loading fees.</p>`; return; }
-
-  const { student, structure, payments, summary } = data;
-  const currency = structure?.currency || 'LKR';
-  const fmt = n => `${currency} ${Number(n).toLocaleString('en-LK', { minimumFractionDigits: 2 })}`;
-
-  // ---- Summary cards ----
-  const summaryHtml = `
-    <div class="fee-summary-grid">
-      <div class="fee-stat-card fee-stat-blue">
-        <div class="fee-stat-label">Monthly Rate</div>
-        <div class="fee-stat-value">${structure ? fmt(structure.monthly_fee) : '—'}</div>
-        <div class="fee-stat-sub">${structure ? `From ${structure.effective_from}` : 'Not set'}</div>
-      </div>
-      <div class="fee-stat-card fee-stat-green">
-        <div class="fee-stat-label">Total Collected</div>
-        <div class="fee-stat-value">${fmt(summary.total_paid)}</div>
-        <div class="fee-stat-sub">All time</div>
-      </div>
-      <div class="fee-stat-card fee-stat-purple">
-        <div class="fee-stat-label">Monthly Payments</div>
-        <div class="fee-stat-value">${fmt(summary.monthly_paid)}</div>
-        <div class="fee-stat-sub">${payments.filter(p=>p.payment_type==='monthly').length} payments</div>
-      </div>
-      <div class="fee-stat-card fee-stat-amber">
-        <div class="fee-stat-label">Extra / Other Fees</div>
-        <div class="fee-stat-value">${fmt(summary.extra_paid)}</div>
-        <div class="fee-stat-sub">${payments.filter(p=>p.payment_type==='extra').length} payments</div>
-      </div>
-    </div>`;
-
-  // ---- Payment history table ----
-// Inside refreshFeeModal() around the historyHtml block:
-  const historyHtml = payments.length ? `
-    <table class="fee-table" id="feePaymentTable">
-      <thead><tr>
-        <th>Date</th><th>Type</th><th>For / Purpose</th><th>Amount</th><th>Receipt #</th><th>Recorded By</th><th></th>
-      </tr></thead>
-      <tbody>
-        ${payments.map(p => `
-          <tr>
-            <td>${p.paid_date}</td>
-            <td><span class="badge ${p.payment_type==='monthly'?'badge-blue':'badge-purple'}">${p.payment_type}</span></td>
-            <td>${escHtml(p.payment_for || '—')}</td>
-            <td><strong>${fmt(p.amount)}</strong></td>
-            <td><code>${escHtml(p.receipt_number || '—')}</code></td>
-            <td class="text-sm text-muted">${escHtml(p.recorded_by_name || '—')}</td>
-            <td>
-              <button class="btn btn-secondary btn-xs" onclick="printPaymentReceipt(${p.id}, ${studentId})" title="Print Single Receipt">🖨️</button>
-              <button class="btn btn-danger btn-xs" onclick="deleteFeePayment(${p.id},${studentId})" title="Delete">✕</button>
-            </td>
-          </tr>`).join('')}
-      </tbody>
-    </table>` : '<p class="text-muted text-sm" style="padding:12px 0">No payments recorded yet.</p>';
-
-  // ---- Add payment form ----
-  const today = new Date().toISOString().split('T')[0];
-  const addPaymentHtml = `
-    <div class="fee-add-form" id="feeAddForm-${studentId}">
-      <div class="form-row form-row-3" style="gap:10px">
-        <div class="form-group" style="margin:0">
-          <label>Type</label>
-          <select class="form-control" id="feeType-${studentId}" onchange="toggleFeeForField(${studentId})">
-            <option value="monthly">Monthly Fee</option>
-            <option value="extra">Extra / Other</option>
-          </select>
-        </div>
-        <div class="form-group" style="margin:0" id="feeForWrap-${studentId}" style="display:none">
-          <label>Purpose</label>
-          <input class="form-control" id="feeFor-${studentId}" placeholder="e.g. Exam fees, Books…">
-        </div>
-        <div class="form-group" style="margin:0">
-          <label>Amount (${currency})</label>
-          <input class="form-control" type="number" step="0.01" id="feeAmount-${studentId}" 
-                 value="${structure ? structure.monthly_fee : ''}" placeholder="0.00">
-        </div>
-        <div class="form-group" style="margin:0">
-          <label>Paid Date</label>
-          <input class="form-control" type="date" id="feePaidDate-${studentId}" value="${today}">
-        </div>
-        <div class="form-group" style="margin:0">
-          <label>Receipt #</label>
-          <input class="form-control" id="feeReceipt-${studentId}" placeholder="Optional">
-        </div>
-        <div class="form-group" style="margin:0">
-          <label>Notes</label>
-          <input class="form-control" id="feeNotes-${studentId}" placeholder="Optional">
-        </div>
-      </div>
-      <button class="btn btn-primary" style="margin-top:12px" onclick="submitFeePayment(${studentId})">
-        + Record Payment
-      </button>
-    </div>`;
-
-  // ---- Set fee structure form ----
-  const structureHtml = `
-    <details class="fee-structure-details" ${!structure ? 'open' : ''}>
-      <summary>⚙️ ${structure ? 'Update' : 'Set'} Monthly Fee Structure</summary>
-      <div class="fee-structure-form" style="margin-top:12px">
-        <div class="form-row form-row-3" style="gap:10px">
-          <div class="form-group" style="margin:0">
-            <label>Monthly Fee (LKR)</label>
-            <input class="form-control" type="number" step="0.01" id="structFee-${studentId}" 
-                   value="${structure ? structure.monthly_fee : ''}">
-          </div>
-          <div class="form-group" style="margin:0">
-            <label>Effective From</label>
-            <input class="form-control" type="date" id="structFrom-${studentId}" 
-                   value="${structure ? structure.effective_from : today}">
-          </div>
-          <div class="form-group" style="margin:0">
-            <label>Notes</label>
-            <input class="form-control" id="structNotes-${studentId}" 
-                   value="${escHtml(structure?.notes || '')}">
-          </div>
-        </div>
-        <button class="btn btn-secondary btn-sm" style="margin-top:10px" 
-                onclick="submitFeeStructure(${studentId})">Save Fee Structure</button>
-      </div>
-    </details>`;
-
-  document.getElementById('modalTitle').textContent = `💰 Fees — ${student.full_name}`;
-  document.getElementById('modalBody').innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-      <div class="text-sm text-muted">
-        ${student.admission_number ? `<code class="adm-number">${escHtml(student.admission_number)}</code>` : ''}
-        ${student.grade ? `<span class="grade-pill" style="margin-left:6px">${escHtml(student.grade)}</span>` : ''}
-      </div>
-      <button class="btn btn-secondary btn-sm" onclick="printFeeStatement(${studentId})">🖨️ Print Statement</button>
-    </div>
-    ${summaryHtml}
-    <div class="fee-section-title">Record New Payment</div>
-    ${addPaymentHtml}
-    <div class="fee-section-title" style="margin-top:20px">Payment History</div>
-    ${historyHtml}
-    <div style="margin-top:16px">${structureHtml}</div>
-  `;
-
-  // Show/hide "purpose" field based on initial type
-  toggleFeeForField(studentId);
-}
-
-function toggleFeeForField(studentId) {
-  const type = document.getElementById(`feeType-${studentId}`)?.value;
-  const wrap = document.getElementById(`feeForWrap-${studentId}`);
-  if (wrap) wrap.style.display = type === 'extra' ? '' : 'none';
-}
-
-async function submitFeeStructure(studentId) {
-  const fee   = document.getElementById(`structFee-${studentId}`)?.value;
-  const from  = document.getElementById(`structFrom-${studentId}`)?.value;
-  const notes = document.getElementById(`structNotes-${studentId}`)?.value || '';
-  if (!fee || !from) { showToast('Monthly fee and effective date are required.', 'error'); return; }
-  const fd = new FormData();
-  fd.append('monthly_fee', fee);
-  fd.append('effective_from', from);
-  fd.append('notes', notes);
-  try {
-    await apiPost(`/api/admin/students/${studentId}/fee-structure`, fd);
-    showToast('Fee structure saved!', 'success');
-    refreshFeeModal(studentId);
-  } catch (e) { showToast(e.message, 'error'); }
-}
-
-async function submitFeePayment(studentId) {
-  const type    = document.getElementById(`feeType-${studentId}`)?.value;
-  const forWhat = document.getElementById(`feeFor-${studentId}`)?.value || '';
-  const amount  = document.getElementById(`feeAmount-${studentId}`)?.value;
-  const date    = document.getElementById(`feePaidDate-${studentId}`)?.value;
-  const receipt = document.getElementById(`feeReceipt-${studentId}`)?.value || '';
-  const notes   = document.getElementById(`feeNotes-${studentId}`)?.value || '';
-
-  if (!amount || !date) { showToast('Amount and date are required.', 'error'); return; }
-  if (type === 'extra' && !forWhat) { showToast('Please enter the purpose for this extra payment.', 'error'); return; }
-
-  const fd = new FormData();
-  fd.append('amount', amount);
-  fd.append('payment_type', type);
-  fd.append('payment_for', type === 'monthly' ? 'Monthly fee' : forWhat);
-  fd.append('paid_date', date);
-  fd.append('receipt_number', receipt);
-  fd.append('notes', notes);
-
-  try {
-    await apiPost(`/api/admin/students/${studentId}/fee-payments`, fd);
-    showToast('Payment recorded!', 'success');
-    refreshFeeModal(studentId);
-  } catch (e) { showToast(e.message, 'error'); }
-}
-
-async function deleteFeePayment(paymentId, studentId) {
-  if (!confirm('Delete this payment record? This cannot be undone.')) return;
-  try {
-    await apiDelete(`/api/admin/fee-payments/${paymentId}`);
-    showToast('Payment deleted.', 'success');
-    refreshFeeModal(studentId);
-  } catch (e) { showToast(e.message, 'error'); }
-}
-
-// ================================================================
-// PRINT FEE STATEMENT
-// ================================================================
-
-async function printFeeStatement(studentId) {
-  const data = await api(`/api/admin/students/${studentId}/fees`).catch(() => null);
-  if (!data) { showToast('Could not load data for printing.', 'error'); return; }
-
-  const { student, structure, payments, summary } = data;
-  const currency = structure?.currency || 'LKR';
-  const fmt = n => `${currency} ${Number(n).toLocaleString('en-LK', { minimumFractionDigits: 2 })}`;
-  const today = new Date().toLocaleDateString('en-LK', { year:'numeric', month:'long', day:'numeric' });
-
-  const rows = payments.map(p => `
-    <tr>
-      <td>${p.paid_date}</td>
-      <td>${p.payment_type === 'monthly' ? 'Monthly Fee' : 'Extra'}</td>
-      <td>${p.payment_for || '—'}</td>
-      <td style="text-align:right"><strong>${fmt(p.amount)}</strong></td>
-      <td>${p.receipt_number || '—'}</td>
-    </tr>`).join('');
-
-  const win = window.open('', '_blank');
-  win.document.write(`<!DOCTYPE html><html><head>
-    <title>Fee Statement — ${student.full_name}</title>
-    <style>
-      body { font-family: 'Arial', sans-serif; padding: 40px; color: #1e293b; }
-      .header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom: 3px solid #1e3a8a; padding-bottom:20px; margin-bottom:24px; }
-      .brand { font-size:22px; font-weight:800; color:#1e3a8a; }
-      .brand small { display:block; font-size:12px; font-weight:400; color:#64748b; letter-spacing:2px; text-transform:uppercase; }
-      .doc-title { font-size:13px; color:#64748b; text-align:right; }
-      .student-info { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-bottom:24px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
-      .info-item label { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:#94a3b8; display:block; }
-      .info-item span { font-size:14px; font-weight:600; }
-      .summary-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:24px; }
-      .sum-card { border:1px solid #e2e8f0; border-radius:8px; padding:14px; text-align:center; }
-      .sum-card .label { font-size:10px; text-transform:uppercase; color:#94a3b8; letter-spacing:1px; }
-      .sum-card .val { font-size:18px; font-weight:700; color:#1e3a8a; margin-top:4px; }
-      table { width:100%; border-collapse:collapse; font-size:13px; }
-      th { background:#1e3a8a; color:white; padding:10px 12px; text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; }
-      td { padding:10px 12px; border-bottom:1px solid #f1f5f9; }
-      tr:last-child td { border-bottom:none; }
-      tr:nth-child(even) td { background:#f8fafc; }
-      .footer { margin-top:40px; border-top:1px solid #e2e8f0; padding-top:16px; font-size:11px; color:#94a3b8; display:flex; justify-content:space-between; }
-      @media print { body { padding:20px; } }
-    </style>
-  </head><body>
-    <div class="header">
-      <div>
-        <div class="brand">🎓 LankaLearn LMS<small>Education Reimagined</small></div>
-      </div>
-      <div class="doc-title">
-        <strong>FEE STATEMENT</strong><br>
-        Printed: ${today}
-      </div>
-    </div>
-
-    <div class="student-info">
-      <div class="info-item"><label>Student Name</label><span>${student.full_name}</span></div>
-      <div class="info-item"><label>Admission No.</label><span>${student.admission_number || '—'}</span></div>
-      <div class="info-item"><label>Grade</label><span>${student.grade || '—'}</span></div>
-      <div class="info-item"><label>Monthly Rate</label><span>${structure ? fmt(structure.monthly_fee) : '—'}</span></div>
-      <div class="info-item"><label>Effective From</label><span>${structure ? structure.effective_from : '—'}</span></div>
-      <div class="info-item"><label>Statement Date</label><span>${today}</span></div>
-    </div>
-
-    <div class="summary-grid">
-      <div class="sum-card"><div class="label">Total Collected</div><div class="val">${fmt(summary.total_paid)}</div></div>
-      <div class="sum-card"><div class="label">Monthly Fees</div><div class="val">${fmt(summary.monthly_paid)}</div></div>
-      <div class="sum-card"><div class="label">Extra / Other</div><div class="val">${fmt(summary.extra_paid)}</div></div>
-    </div>
-
-    <table>
-      <thead><tr><th>Date</th><th>Type</th><th>Purpose</th><th style="text-align:right">Amount</th><th>Receipt #</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="5" style="text-align:center;color:#94a3b8">No payments recorded</td></tr>'}</tbody>
-    </table>
-
-    <div class="footer">
-      <span>LankaLearn LMS — Confidential Fee Statement</span>
-      <span>Generated on ${today}</span>
-    </div>
-    <script>window.onload = () => { window.print(); }</script>
-  </body></html>`);
-  win.document.close();
-}
-
-
-
-// ================================================================
-// DEDICATED ADMIN FEE SECTION
+// HYBRID DIRECT PAYMENT FEES
 // ================================================================
 
 async function loadAdminFees() {
@@ -1074,19 +996,65 @@ async function loadAdminFees() {
   setActiveSidebar('fees');
   setContent('<div class="loading-state"><div class="spinner"></div></div>');
   
-  const users = await api('/api/admin/users');
+  const [users, gradeFees] = await Promise.all([
+    api('/api/admin/users'),
+    api('/api/admin/grade-fees')
+  ]);
+  
   const students = users.filter(u => u.role === 'student');
+  window._currentGradeFees = gradeFees; // Store for quick lookups
+  
+  // Re-use your existing GRADE_OPTIONS from the Users tab
+  const gradeOptionsHtml = GRADE_OPTIONS.filter(g => g.value !== '').map(g => 
+      `<option value="${escHtml(g.value)}">${escHtml(g.label)}</option>`
+  ).join('');
   
   setContent(`
     <div class="page-header page-header-row">
       <div style="display:flex; justify-content:space-between; width:100%;">
-        <div><h1>💰 Fee Management</h1><p>Record payments and print receipts</p></div>
-        <button class="btn btn-secondary" onclick="printMasterFeeReport()">🖨️ Print Master Report</button>
+        <div><h1>💰 Fee Portal</h1><p>Record payments and set grade fees.</p></div>
       </div>
     </div>
+
+    <div class="card mb-24">
+      <div class="card-header" style="cursor:pointer;" onclick="document.getElementById('masterFeesBody').style.display = document.getElementById('masterFeesBody').style.display === 'none' ? 'block' : 'none'">
+        <span class="card-title">⚙️ Master Grade Fees (Click to Expand/Collapse)</span>
+      </div>
+      <div class="card-body" id="masterFeesBody" style="display:none;">
+        <table style="width:100%; font-size:13px; margin-bottom:16px;">
+          <thead><tr>
+            <th style="text-align:left; padding-bottom:8px;">Grade</th>
+            <th style="text-align:right; padding-bottom:8px;">Monthly Tuition (LKR)</th>
+            <th style="text-align:right; padding-bottom:8px;">Action</th>
+          </tr></thead>
+          <tbody>
+            ${gradeFees.map(f => `<tr>
+              <td style="padding:6px 0; border-top:1px solid #eee;"><strong>${escHtml(f.grade_name)}</strong></td>
+              <td style="text-align:right; padding:6px 0; border-top:1px solid #eee;">${f.monthly_tuition.toLocaleString()}</td>
+              <td style="text-align:right; padding:6px 0; border-top:1px solid #eee;">
+                <button class="btn btn-secondary btn-xs" onclick="editMasterFee('${escHtml(f.grade_name)}', ${f.monthly_tuition})">Edit</button>
+                <button class="btn btn-danger btn-xs" onclick="deleteMasterFee('${escHtml(f.grade_name)}')">✕</button>
+              </td>
+            </tr>`).join('')}
+            ${!gradeFees.length ? '<tr><td colspan="3" class="text-muted text-center" style="padding:10px;">No master fees set.</td></tr>' : ''}
+          </tbody>
+        </table>
+        
+        <div style="display:flex; gap:8px; align-items:center; background:#f8fafc; padding:12px; border-radius:8px; border:1px solid var(--border);">
+          <select id="newGradeName" class="form-control" onchange="autoFillMasterFee(this.value)">
+             <option value="">-- Select Grade --</option>
+             ${gradeOptionsHtml}
+          </select>
+          <input type="number" id="newGradeFee" class="form-control" placeholder="Amount (LKR)">
+          <button class="btn btn-primary" onclick="saveMasterGradeFee()">Save Fee</button>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-header" style="background:#fafafa;">
-        <input type="text" id="feeStudentSearch" class="search-box" placeholder="🔍 Search student name or adm. no..." oninput="filterFeeStudents()">
+        <span class="card-title">Select Student to Record Payment</span>
+        <input type="text" id="feeStudentSearch" class="search-box" style="float:right;" placeholder="🔍 Search student..." oninput="filterFeeStudents()">
       </div>
       <div class="table-wrapper">
         <table id="feeStudentsTable">
@@ -1097,7 +1065,7 @@ async function loadAdminFees() {
                 <td><strong>${escHtml(s.full_name)}</strong><br><code class="text-muted">${escHtml(s.username)}</code></td>
                 <td>${s.admission_number ? `<code class="adm-number">${escHtml(s.admission_number)}</code>` : '—'}</td>
                 <td><span class="grade-pill">${escHtml(s.grade || 'Unassigned')}</span></td>
-                <td><button class="btn btn-primary btn-sm" onclick="showStudentFees(${s.id},'${escHtml(s.full_name)}')">Manage Fees & Receipts</button></td>
+                <td><button class="btn btn-success btn-sm" onclick="window.openPaymentPortal(${s.id},'${escHtml(s.full_name)}')">Open Portal</button></td>
               </tr>
             `).join('')}
           </tbody>
@@ -1114,49 +1082,294 @@ async function loadAdminFees() {
   };
 }
 
+window.editMasterFee = (gradeName, amount) => {
+    document.getElementById('newGradeName').value = gradeName;
+    document.getElementById('newGradeFee').value = amount;
+    document.getElementById('newGradeFee').focus();
+};
 
-// ADD THIS FUNCTION AT THE BOTTOM OF ADMIN.JS
-async function printPaymentReceipt(paymentId, studentId) {
-  const data = await api(`/api/admin/students/${studentId}/fees`).catch(() => null);
-  if (!data) return;
-  const p = data.payments.find(x => x.id === paymentId);
-  if (!p) return;
+window.autoFillMasterFee = (gradeName) => {
+    const feeRecord = window._currentGradeFees.find(f => f.grade_name === gradeName);
+    if (feeRecord) {
+        document.getElementById('newGradeFee').value = feeRecord.monthly_tuition;
+    } else {
+        document.getElementById('newGradeFee').value = '';
+    }
+};
+
+window.saveMasterGradeFee = async () => {
+  const grade = document.getElementById('newGradeName').value;
+  const amount = document.getElementById('newGradeFee').value;
+  if(!grade || !amount) return showToast("Select a grade and enter an amount", "error");
   
-  const currency = data.structure?.currency || 'LKR';
-  const fmt = n => `${currency} ${Number(n).toLocaleString('en-LK', { minimumFractionDigits: 2 })}`;
+  const fd = new FormData(); 
+  fd.append('grade_name', grade); 
+  fd.append('monthly_tuition', amount);
   
-  const win = window.open('', '_blank');
-  win.document.write(`<!DOCTYPE html><html><head>
-    <title>Receipt — ${p.receipt_number || 'Payment'}</title>
-    <style>
-      body { font-family: 'DM Sans', Arial, sans-serif; padding: 40px; color: #1e293b; max-width: 600px; margin: 0 auto; }
-      .header { text-align: center; border-bottom: 2px dashed #cbd5e1; padding-bottom: 20px; margin-bottom: 20px; }
-      .header h1 { margin: 0; color: #1e3a8a; font-size: 24px; }
-      .header p { margin: 5px 0 0; color: #64748b; font-size: 14px; }
-      .row { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 15px; }
-      .row.total { font-weight: bold; font-size: 18px; border-top: 2px solid #1e293b; padding-top: 12px; margin-top: 12px; }
-      .footer { text-align: center; margin-top: 40px; color: #94a3b8; font-size: 12px; }
-      @media print { body { padding: 0; } }
-    </style>
-  </head><body>
-    <div class="header">
-      <h1>LankaLearn LMS</h1>
-      <p>Official Payment Receipt</p>
+  try {
+      await apiPost('/api/admin/grade-fees', fd); 
+      showToast("Fee updated!", "success"); 
+      loadAdminFees();
+  } catch(e) { showToast(e.message, "error"); }
+};
+
+window.deleteMasterFee = async (gradeName) => {
+    if (!confirm(`Are you sure you want to delete the master fee for ${gradeName}?`)) return;
+    try {
+        await apiDelete(`/api/admin/grade-fees/${encodeURIComponent(gradeName)}`);
+        showToast("Master fee deleted", "success");
+        loadAdminFees();
+    } catch (e) { showToast(e.message, "error"); }
+};
+
+
+window.openPaymentPortal = async (sid, name) => {
+    openModal(`Payment Portal — ${name}`, '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
+    const data = await api(`/api/admin/students/${sid}/fees`);
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const today = new Date().toISOString().split('T')[0];
+    
+    const autoAmount = data.master_fee > 0 ? data.master_fee : '';
+    
+    let html = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <div><strong>Grade:</strong> <span class="grade-pill">${escHtml(data.student.grade || 'Unassigned')}</span></div>
+      <div><strong>Standard Monthly Fee:</strong> <span class="badge badge-blue">LKR ${data.master_fee.toLocaleString()}</span></div>
     </div>
-    <div class="row"><span>Receipt No:</span> <strong>${p.receipt_number || 'N/A'}</strong></div>
-    <div class="row"><span>Date:</span> <strong>${p.paid_date}</strong></div>
-    <div class="row"><span>Student:</span> <strong>${data.student.full_name} (${data.student.admission_number || 'N/A'})</strong></div>
-    <div class="row"><span>Payment For:</span> <strong>${p.payment_type === 'monthly' ? 'Monthly Fee' : p.payment_for}</strong></div>
-    ${p.notes ? `<div class="row"><span>Notes:</span> <strong>${p.notes}</strong></div>` : ''}
-    <div class="row total"><span>Amount Paid:</span> <span>${fmt(p.amount)}</span></div>
-    <div class="footer">Thank you for your payment.<br>Recorded by: ${p.recorded_by_name || 'Admin'}</div>
-    <script>window.onload = () => { window.print(); }</script>
-  </body></html>`);
-  win.document.close();
-}
 
+    <div style="background:#f8fafc; border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:24px;">
+      <h4 style="margin-top:0; margin-bottom:12px;">Record New Payment</h4>
+      <div class="form-row form-row-2">
+        <div class="form-group">
+          <label>Payment Type</label>
+          <select id="payType" class="form-control" onchange="togglePayFields(${data.master_fee})">
+            <option value="monthly">Monthly Tuition</option>
+            <option value="extra">Other / Extra Fee</option>
+          </select>
+        </div>
+        <div class="form-group" id="payMonthWrap">
+          <label>Which Month?</label>
+          <input type="month" id="payMonth" class="form-control" value="${currentMonth}">
+        </div>
+        <div class="form-group" id="payDescWrap" style="display:none;">
+          <label>Description</label>
+          <input type="text" id="payDesc" class="form-control" placeholder="e.g. Exam Fee, Uniform">
+        </div>
+      </div>
+      <div class="form-row form-row-3">
+        <div class="form-group">
+          <label>Amount (LKR)</label>
+          <input type="number" id="payAmount" class="form-control" value="${autoAmount}" required>
+        </div>
+        <div class="form-group"><label>Date</label><input type="date" id="payDate" class="form-control" value="${today}"></div>
+        <div class="form-group"><label>Receipt #</label><input type="text" id="payReceipt" class="form-control" placeholder="Optional"></div>
+      </div>
+      <button class="btn btn-primary w-full" onclick="processDirectPayment(${sid})">Submit Payment</button>
+    </div>
 
-// Add to bottom of admin.js
+    <h4>Payment History</h4>
+    <table style="width:100%; font-size:13px; border-collapse:collapse;">
+        <thead><tr style="background:#f8fafc; border-bottom:2px solid #ddd;"><th style="padding:8px;text-align:left;">Date</th><th style="padding:8px;text-align:left;">Details</th><th style="padding:8px;text-align:right;">Amount</th><th style="padding:8px;text-align:center;">Action</th></tr></thead>
+        <tbody>`;
+        
+    data.payments.forEach(p => {
+        const details = p.payment_type === 'monthly' ? `<span class="badge badge-blue">Monthly: ${p.fee_month}</span>` : `<span class="badge badge-purple">Other: ${p.payment_for}</span>`;
+        html += `<tr>
+            <td style="padding:8px;border-bottom:1px solid #eee;">${p.paid_date}</td>
+            <td style="padding:8px;border-bottom:1px solid #eee;">${details}<br><span class="text-muted text-sm">Cashier: ${escHtml(p.recorded_by_name || 'Admin')}</span></td>
+            <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;"><strong>LKR ${p.amount.toLocaleString()}</strong></td>
+            <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">
+                <button class="btn btn-secondary btn-xs" onclick="window.printPaymentReceipt(${p.id}, ${sid})" title="Print Receipt">🖨️</button>
+                <button class="btn btn-danger btn-xs" onclick="deletePayment(${p.id}, ${sid})">✕</button>
+            </td>
+        </tr>`;
+    });
+    if(!data.payments.length) html += '<tr><td colspan="4" class="text-muted text-center" style="padding:10px;">No payments recorded.</td></tr>';
+    html += `</tbody></table>`;
+    
+    document.getElementById('modalBody').innerHTML = html;
+};
+
+window.togglePayFields = (masterFee) => {
+    const type = document.getElementById('payType').value;
+    if (type === 'monthly') {
+        document.getElementById('payMonthWrap').style.display = 'block';
+        document.getElementById('payDescWrap').style.display = 'none';
+        document.getElementById('payAmount').value = masterFee > 0 ? masterFee : '';
+    } else {
+        document.getElementById('payMonthWrap').style.display = 'none';
+        document.getElementById('payDescWrap').style.display = 'block';
+        document.getElementById('payAmount').value = '';
+    }
+};
+
+window.processDirectPayment = async (sid) => {
+    const type = document.getElementById('payType').value;
+    const amount = document.getElementById('payAmount').value;
+    const date = document.getElementById('payDate').value;
+    const receipt = document.getElementById('payReceipt').value;
+    
+    const fd = new FormData();
+    fd.append('amount', amount);
+    fd.append('paid_date', date);
+    fd.append('receipt_number', receipt);
+    fd.append('payment_type', type);
+    
+    if (type === 'monthly') {
+        const monthVal = document.getElementById('payMonth').value;
+        if (!monthVal) return showToast('Please select a month', 'error');
+        fd.append('fee_month', monthVal);
+        fd.append('payment_for', 'Monthly Tuition');
+    } else {
+        const descVal = document.getElementById('payDesc').value;
+        if (!descVal) return showToast('Please enter a description', 'error');
+        fd.append('payment_for', descVal);
+        fd.append('fee_month', '');
+    }
+
+    try {
+        await apiPost(`/api/admin/students/${sid}/fee-payments`, fd);
+        showToast('Payment recorded successfully!', 'success');
+        window.openPaymentPortal(sid, document.getElementById('modalTitle').textContent.split(' — ')[1]);
+    } catch(e) { showToast(e.message, 'error'); }
+};
+
+window.deletePayment = async (pid, sid) => {
+    if(!confirm("Delete this payment record permanently?")) return;
+    try {
+        await apiDelete(`/api/admin/fee-payments/${pid}`);
+        showToast('Deleted', 'success');
+        window.openPaymentPortal(sid, document.getElementById('modalTitle').textContent.split(' — ')[1]);
+    } catch(e) { showToast(e.message, 'error'); }
+};
+
+// ================================================================
+// GLOBAL PRINTING HELPERS
+// ================================================================
+
+window.printTermReportCard = async (studentId, studentName) => {
+    // Open a blank window immediately to prevent pop-up blockers
+    const win = window.open('', '_blank');
+    win.document.write('<div style="font-family:sans-serif; padding:40px;"><h2>Generating official report card...</h2></div>');
+    
+    try {
+        // Fetch the real data from the database
+        const data = await api(`/api/admin/students/${studentId}/report-card`);
+        const today = new Date().toLocaleDateString('en-LK', { year:'numeric', month:'long', day:'numeric' });
+        
+        let rowsHtml = '';
+        if (data.results.length === 0) {
+            rowsHtml = '<tr><td colspan="3" style="padding:20px; color:#666;">Student is not currently enrolled in any courses.</td></tr>';
+        } else {
+            rowsHtml = data.results.map(r => `
+                <tr>
+                    <td class="subject-name">${escHtml(r.course_name)}</td>
+                    <td>${r.percentage !== null ? `<strong>${r.percentage}%</strong>` : '<span style="color:#999">—</span>'}</td>
+                    <td>${r.remarks}</td>
+                </tr>
+            `).join('');
+        }
+        
+        const finalHtml = `<!DOCTYPE html><html><head>
+            <title>Term Report — ${escHtml(studentName)}</title>
+            <style>
+                body { font-family: 'Times New Roman', serif; padding: 40px; color: #000; max-width: 800px; margin: 0 auto; }
+                .school-header { text-align: center; border-bottom: 4px double #800000; padding-bottom: 20px; margin-bottom: 30px; }
+                .school-header h1 { color: #800000; font-size: 32px; margin: 0; text-transform: uppercase; letter-spacing: 2px;}
+                .school-header h3 { color: #555; margin: 5px 0 0 0; font-weight: normal; }
+                .student-details { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 30px; border: 1px solid #000; padding: 15px; }
+                table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+                th, td { border: 1px solid #000; padding: 10px; text-align: center; }
+                th { background-color: #f0f0f0; text-transform: uppercase; font-size: 12px; }
+                td.subject-name { text-align: left; font-weight: bold; }
+                .signatures { display: flex; justify-content: space-between; margin-top: 60px; }
+                .sig-line { border-top: 1px solid #000; width: 200px; text-align: center; padding-top: 5px; font-size: 14px; }
+            </style>
+        </head><body>
+            <div class="school-header">
+                <h1>Wesswood International College</h1>
+                <h3>Official End-of-Term Academic Report</h3>
+                <p>Term 1 - ${new Date().getFullYear()}</p>
+            </div>
+            <div class="student-details">
+                <div><strong>Student Name:</strong> ${escHtml(data.student.full_name)}</div>
+                <div><strong>Admission No:</strong> ${escHtml(data.student.admission_number || 'N/A')}</div>
+                <div><strong>Grade:</strong> ${escHtml(data.student.grade || 'N/A')}</div>
+                <div><strong>Date Issued:</strong> ${today}</div>
+            </div>
+            <table>
+                <thead><tr><th style="width: 50%;">Subject</th><th>Term Grade</th><th>Remarks</th></tr></thead>
+                <tbody>
+                    ${rowsHtml}
+                </tbody>
+            </table>
+            <div class="signatures">
+                <div class="sig-line">Class Teacher</div>
+                <div class="sig-line">Principal</div>
+            </div>
+            <script>
+                // Slight delay to ensure fonts render before the print dialog opens
+                setTimeout(() => { window.print(); }, 300);
+            </script>
+        </body></html>`;
+        
+        // Write the final HTML over the loading message
+        win.document.open();
+        win.document.write(finalHtml);
+        win.document.close();
+        
+    } catch(e) {
+        win.document.body.innerHTML = `<div style="font-family:sans-serif; padding:40px; color:red;">
+            <h2>Failed to load report card</h2>
+            <p>${escHtml(e.message)}</p>
+        </div>`;
+    }
+};
+
+window.printPaymentReceipt = async (pid, sid) => {
+    const data = await api(`/api/admin/students/${sid}/fees`);
+    const p = data.payments.find(x => x.id === pid);
+    if(!p) return;
+    
+    const win = window.open('', '_blank');
+    const displayType = p.payment_type === 'monthly' ? `Monthly Tuition (${p.fee_month})` : p.payment_for;
+    
+    win.document.write(`
+        <html><head><title>Receipt - ${p.receipt_number || p.id}</title>
+        <style>
+            body { font-family: 'Times New Roman', serif; padding: 40px; color: #000; }
+            .receipt-box { border: 1px solid #000; padding: 30px; max-width: 450px; margin: 0 auto; border-radius: 8px; }
+            .school-name { text-align: center; font-size: 24px; font-weight: bold; margin-bottom: 5px; color: #1e3a8a; font-family: Arial, sans-serif; }
+            .header-title { text-align: center; text-decoration: underline; margin-bottom: 20px; font-family: Arial, sans-serif; }
+            .row { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 15px; }
+            .row span:first-child { font-weight: bold; }
+            hr { border-top: 1px dashed #ccc; margin: 20px 0; }
+        </style>
+        </head><body>
+        <div class="receipt-box">
+            <div class="school-name">Wesswood International College</div>
+            <div class="header-title">OFFICIAL PAYMENT RECEIPT</div>
+            
+            <div class="row"><span>Receipt No:</span> <span>${p.receipt_number || 'SYS-' + p.id}</span></div>
+            <div class="row"><span>Date:</span> <span>${p.paid_date}</span></div>
+            <hr>
+            <div class="row"><span>Student Name:</span> <span>${escHtml(data.student.full_name)}</span></div>
+            <div class="row"><span>Admission No:</span> <span>${escHtml(data.student.admission_number || 'N/A')}</span></div>
+            <div class="row"><span>Payment For:</span> <span>${escHtml(displayType)}</span></div>
+            <hr>
+            <div class="row" style="font-size: 18px;"><span>Total Paid:</span> <span>LKR ${p.amount.toLocaleString()}</span></div>
+            <hr>
+            <div class="row"><span>Cashier:</span> <span>${escHtml(p.recorded_by_name || 'Admin')}</span></div>
+            
+            <div style="text-align:center; font-size:13px; margin-top:30px; color:#555;">
+                Thank you for your payment.<br>This is a computer-generated receipt.
+            </div>
+        </div>
+        <script>window.onload=()=>window.print()</script></body></html>
+    `);
+    win.document.close();
+};
+
 window.printUserProfile = (uid) => {
   const u = window._adminUsers.find(x => x.id === uid);
   const win = window.open('', '_blank');
@@ -1191,15 +1404,16 @@ window.printMasterFeeReport = async () => {
   win.document.close();
 };
 
+// ================================================================
+// MISC & UTILS
+// ================================================================
 
-// Helper function to color the role badges on the dashboard
 function roleBadge(role) {
   if (role === 'admin' || role === 'super_admin') return 'badge-red';
   if (role === 'sub_admin') return 'badge-blue';
   if (role === 'teacher') return 'badge-purple';
-  return 'badge-blue'; // Default for students
+  return 'badge-blue'; 
 }
-
 
 async function resetUserPassword(uid, name) {
     if (!confirm(`Reset password for ${name}? This will generate a new temporary password.`)) return;
@@ -1215,3 +1429,44 @@ async function resetUserPassword(uid, name) {
         `);
     } catch (e) { showToast(e.message, 'error'); }
 }
+
+window.showBroadcastModal = () => {
+  openModal('Send School-Wide Alert', modalForm([
+    { label: 'Alert Title', name: 'title', placeholder: 'e.g. Unexpected School Closure', required: true },
+    { label: 'Message', name: 'message', type: 'textarea', placeholder: 'Details of the announcement...', required: true },
+    { label: 'Target Audience', name: 'target', type: 'select', options: [
+        {value: 'all', label: 'Everyone'},
+        {value: 'students', label: 'Students Only'},
+        {value: 'teachers', label: 'Teachers Only'}
+    ]},
+    { label: 'Expires In (Hours)', name: 'hours', type: 'number', value: '24', required: true }
+  ], async (fd) => {
+    try {
+      await apiPost('/api/admin/broadcasts', fd);
+      closeModal();
+      showToast('Broadcast sent!', 'success');
+      setTimeout(() => window.location.reload(), 1000);
+    } catch (e) { 
+      showToast(e.message, 'error'); 
+    }
+  }, 'Send Alert'));
+};
+
+window.clearActiveBroadcast = async () => {
+  if (!confirm("Are you sure you want to remove the active alert for all users?")) return;
+  
+  try {
+    await apiDelete('/api/admin/broadcasts/active');
+    
+    const firstElement = document.body.firstElementChild;
+    if (firstElement && firstElement.innerHTML.includes('🚨')) {
+        firstElement.style.display = 'none';
+        document.querySelector('.top-header').style.top = '0px';
+        document.querySelector('.sidebar').style.top = '64px';
+    }
+    
+    showToast('Active alert cleared successfully!', 'success');
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+};
