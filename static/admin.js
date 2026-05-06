@@ -434,9 +434,8 @@ async function loadAdminUsers(activeTab) {
   setPageTitle('Users');
   setActiveSidebar('users');
   setContent('<div class="loading-state"><div class="spinner"></div></div>');
+  
   const users = await api('/api/admin/users');
-
-  // Cache for editing
   window._adminUsers = users;
 
   const teachers  = users.filter(u => u.role === 'teacher');
@@ -446,154 +445,26 @@ async function loadAdminUsers(activeTab) {
 
   function teacherTable(list) {
     if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
-    return `
-      <div class="bulk-toolbar" id="teacherBulkBar" style="display:none">
-        <span id="teacherSelCount">0</span> selected
-        <button class="btn btn-danger btn-sm" onclick="bulkDelete('teacher')">🗑 Delete Selected</button>
-        <button class="btn btn-secondary btn-sm" onclick="clearSelection('teacher')">✕ Clear</button>
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th style="width:40px"><input type="checkbox" id="teacherSelectAll" onchange="toggleSelectAll('teacher', this.checked)" title="Select all"></th>
-            <th>Profile</th><th>Details</th><th>Contact / Extra</th><th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="teacherTableBody">
-          ${list.map(u => {
-            const imgUrl = u.profile_image ? `/uploads/${u.profile_image.split('/').map(encodeURIComponent).join('/')}` : '';
-            const imgHtml = imgUrl
-              ? `<img src="${imgUrl}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">`
-              : `<div class="user-avatar" style="width:40px;height:40px;font-size:16px;">${u.full_name.charAt(0)}</div>`;
-            const isYou = u.id === currentUser.id;
-            return `<tr data-uid="${u.id}" data-role="teacher">
-              <td style="width:40px;text-align:center;">
-                ${isYou ? '' : `<input type="checkbox" class="row-check teacher-check" data-uid="${u.id}" onchange="onRowCheck('teacher')">`}
-              </td>
-              <td style="width:60px;text-align:center;">${imgHtml}</td>
-              <td>
-                <strong>${escHtml(u.full_name)}</strong><br>
-                <code>${escHtml(u.username)}</code><br>
-                <span class="badge badge-purple" style="margin-top:4px">teacher</span>
-              </td>
-              <td>
-                <div class="text-sm">
-                  ${u.phone ? `<strong>Phone:</strong> ${escHtml(u.phone)}<br>` : ''}
-                  ${u.dob ? `<strong>DOB:</strong> ${escHtml(u.dob)}<br>` : ''}
-                  ${u.address ? `<strong>Address:</strong> ${escHtml(u.address)}<br>` : ''}
-                  ${u.notes ? `<strong>Notes:</strong> ${escHtml(u.notes)}` : ''}
-                </div>
-              </td>
-              <td>
-                ${isYou ? '<span class="text-muted text-sm">You</span>' : `
-                  <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'teacher')">Edit</button>
-                  <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${u.id})" title="Print Profile">🖨️</button>
-                  <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')">Reset PW</button>
-                  <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
-                `}
-              </td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>`;
+    return `<table><thead><tr><th>Profile</th><th>Details</th><th>Actions</th></tr></thead><tbody>
+      ${list.map(u => `<tr><td><strong>${escHtml(u.full_name)}</strong></td><td><code>${escHtml(u.username)}</code></td><td><button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'teacher')">Edit</button></td></tr>`).join('')}
+    </tbody></table>`;
   }
 
   function studentTable(list) {
     if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
-
-    const grades = [...new Set(list.map(u => u.grade || 'Unassigned'))].sort((a, b) => {
-      if (a === 'Unassigned') return 1;
-      if (b === 'Unassigned') return -1;
-      return a.localeCompare(b, undefined, { numeric: true });
-    });
-
-    const gradeOptions = ['All', ...grades].map(g =>
-      `<option value="${escHtml(g)}">${escHtml(g)}</option>`
-    ).join('');
-
-    return `
-      <div class="bulk-toolbar" id="studentBulkBar" style="display:none">
-        <span id="studentSelCount">0</span> selected
-        <button class="btn btn-danger btn-sm" onclick="bulkDelete('student')">🗑 Delete Selected</button>
-        <button class="btn btn-secondary btn-sm" onclick="clearSelection('student')">✕ Clear</button>
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th style="width:40px"><input type="checkbox" id="studentSelectAll" onchange="toggleSelectAll('student', this.checked)" title="Select all"></th>
-            <th>Profile</th>
-            <th>Details</th>
-            <th style="min-width:130px">Adm. No.</th>
-            <th style="min-width:160px">
-              Grade
-              <select id="gradeFilter" onchange="filterStudentsByGrade()" style="margin-left:8px;padding:3px 6px;border-radius:6px;border:1px solid var(--border);font-size:12px;cursor:pointer;">
-                ${gradeOptions}
-              </select>
-            </th>
-            <th>Contact / Extra</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="studentTableBody">
-          ${list.map(u => {
-            const imgUrl = u.profile_image ? `/uploads/${u.profile_image.split('/').map(encodeURIComponent).join('/')}` : '';
-            const imgHtml = imgUrl
-              ? `<img src="${imgUrl}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">`
-              : `<div class="user-avatar" style="width:40px;height:40px;font-size:16px;">${u.full_name.charAt(0)}</div>`;
-            const grade = u.grade || 'Unassigned';
-            return `<tr data-uid="${u.id}" data-role="student" data-grade="${escHtml(grade)}">
-              <td style="width:40px;text-align:center;">
-                <input type="checkbox" class="row-check student-check" data-uid="${u.id}" onchange="onRowCheck('student')">
-              </td>
-              <td style="width:60px;text-align:center;">${imgHtml}</td>
-              <td>
-                <strong>${escHtml(u.full_name)}</strong><br>
-                <code>${escHtml(u.username)}</code><br>
-                <span class="badge badge-blue" style="margin-top:4px">student</span>
-              </td>
-              <td>
-                ${u.admission_number ? `<code class="adm-number">${escHtml(u.admission_number)}</code>` : '<span class="text-muted text-sm">—</span>'}
-              </td>
-              <td>
-                <span class="grade-pill">${escHtml(grade)}</span>
-              </td>
-              <td>
-                <div class="text-sm">
-                  ${u.phone ? `<strong>Phone:</strong> ${escHtml(u.phone)}<br>` : ''}
-                  ${u.dob ? `<strong>DOB:</strong> ${escHtml(u.dob)}<br>` : ''}
-                  ${u.address ? `<strong>Address:</strong> ${escHtml(u.address)}<br>` : ''}
-                  ${u.notes ? `<strong>Notes:</strong> ${escHtml(u.notes)}` : ''}
-                </div>
-              </td>
-              <td>
-                <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'student')">Edit</button>
-                <button class="btn btn-sm" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="window.openPaymentPortal(${u.id},'${escHtml(u.full_name)}')">💰 Fees</button>
-                <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${u.id})" title="Print Profile">🖨️</button>
-                <button class="btn btn-secondary btn-sm" onclick="window.printTermReportCard(${u.id}, '${escHtml(u.full_name)}')">📄 Report Card</button>
-                <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')">Reset PW</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
-              </td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>`;
+    return `<table><thead><tr><th>Profile</th><th>Details</th><th>Grade</th><th>Actions</th></tr></thead><tbody>
+      ${list.map(u => `<tr><td><strong>${escHtml(u.full_name)}</strong></td><td><code>${escHtml(u.username)}</code></td><td><span class="grade-pill">${escHtml(u.grade || '—')}</span></td><td><button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'student')">Edit</button></td></tr>`).join('')}
+    </tbody></table>`;
   }
 
   function adminTable(list, roleLabel) {
     if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
-    return `<table><thead><tr><th>Profile</th><th>Details</th><th>Contact / Extra</th><th>Actions</th></tr></thead>
-    <tbody>${list.map(u => {
-      const imgUrl = u.profile_image ? `/uploads/${u.profile_image.split('/').map(encodeURIComponent).join('/')}` : '';
-      const imgHtml = imgUrl ? `<img src="${imgUrl}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">` : `<div class="user-avatar" style="width:40px;height:40px;font-size:16px;">${u.full_name.charAt(0)}</div>`;
-      return `<tr>
-        <td style="width:60px;text-align:center;">${imgHtml}</td>
-        <td><strong>${escHtml(u.full_name)}</strong><br><code>${escHtml(u.username)}</code><br><span class="badge badge-purple" style="margin-top:4px">${u.role}</span></td>
-        <td><div class="text-sm">${u.phone ? `<strong>Phone:</strong> ${escHtml(u.phone)}<br>` : ''}${u.notes ? `<strong>Notes:</strong> ${escHtml(u.notes)}` : ''}</div></td>
-        <td>${u.id !== currentUser.id ? `<button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'${roleLabel}')">Edit</button> <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')">Reset PW</button> <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>` : '<span class="text-muted text-sm">You</span>'}</td>
-      </tr>`;
-    }).join('')}</tbody></table>`;
+    return `<table><thead><tr><th>Name</th><th>Role</th><th>Actions</th></tr></thead><tbody>
+      ${list.map(u => `<tr><td><strong>${escHtml(u.full_name)}</strong></td><td>${u.role}</td><td><button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'${roleLabel}')">Edit</button></td></tr>`).join('')}
+    </tbody></table>`;
   }
 
+  // Render main layout
   setContent(`
     <div class="page-header page-header-row">
       <div><h1>👥 Users</h1><p>Manage all accounts in the system</p></div>
@@ -602,52 +473,89 @@ async function loadAdminUsers(activeTab) {
     <div class="tabs">
       <button class="tab-btn" id="tbtn-tab-teachers" onclick="switchTab(this,'tab-teachers')">👨‍🏫 Teachers (${teachers.length})</button>
       <button class="tab-btn" id="tbtn-tab-students" onclick="switchTab(this,'tab-students')">🎒 Students (${students.length})</button>
+      <button class="tab-btn" id="tbtn-tab-classes" onclick="switchTab(this,'tab-classes')">🏫 Classes</button>
       <button class="tab-btn" id="tbtn-tab-subadmins" onclick="switchTab(this,'tab-subadmins')">🏢 Office Staff (${subAdmins.length})</button>
       <button class="tab-btn" id="tbtn-tab-admins" onclick="switchTab(this,'tab-admins')">🔐 Admins (${admins.length})</button>
     </div>
 
     <div id="tab-teachers" class="tab-panel card" style="display:none">
-      <div class="card-header" style="background:#fafafa;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <input type="text" id="teacherSearchBox" class="search-box" placeholder="🔍 Search teachers…" oninput="filterTeachersSearch()">
-        <div style="flex:1"></div>
-        <button class="btn btn-primary btn-sm" onclick="showCreateUser('teacher')">+ Create Teacher</button>
+      <div class="card-header" style="background:#fafafa;display:flex;align-items:center;gap:10px;">
+        <input type="text" class="search-box" placeholder="🔍 Search teachers…" oninput="filterTeachersSearch()">
+        <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showCreateUser('teacher')">+ Create Teacher</button>
       </div>
       <div class="card-body" style="padding:0">${teacherTable(teachers)}</div>
     </div>
 
     <div id="tab-students" class="tab-panel card" style="display:none">
-      <div class="card-header" style="background:#fafafa;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <input type="text" id="studentSearchBox" class="search-box" placeholder="🔍 Search students…" oninput="filterStudentsSearch()">
-        <div style="flex:1"></div>
-        <button class="btn btn-primary btn-sm" onclick="showCreateUser('student')">+ Create Student</button>
+      <div class="card-header" style="background:#fafafa;display:flex;align-items:center;gap:10px;">
+        <input type="text" class="search-box" placeholder="🔍 Search students…" oninput="filterStudentsSearch()">
+        <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showCreateUser('student')">+ Create Student</button>
       </div>
       <div class="card-body" style="padding:0">${studentTable(students)}</div>
     </div>
 
+    <div id="tab-classes" class="tab-panel card" style="display:none">
+      <div class="card-header" style="background:#fafafa;">
+        <h3 style="margin:0; font-size:16px;">Class Directory</h3>
+        <p class="text-sm text-muted">Students grouped by Grade Level</p>
+      </div>
+      <div class="card-body" id="classDirectoryBody"></div>
+    </div>
+
     <div id="tab-subadmins" class="tab-panel card" style="display:none">
-      <div class="card-header" style="background:#fafafa;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <h3 style="margin:0; font-size:16px;">Office Staff (Sub Admins)</h3>
-        <div style="flex:1"></div>
-        <button class="btn btn-primary btn-sm" onclick="showCreateUser('sub_admin')">+ Create Office Staff</button>
+      <div class="card-header" style="background:#fafafa;display:flex;align-items:center;">
+        <h3 style="margin:0; font-size:16px;">Office Staff</h3>
+        <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showCreateUser('sub_admin')">+ Create Staff</button>
       </div>
       <div class="card-body" style="padding:0">${adminTable(subAdmins, 'sub_admin')}</div>
     </div>
 
     <div id="tab-admins" class="tab-panel card" style="display:none">
-       <div class="card-header" style="background:#fafafa;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <h3 style="margin:0; font-size:16px;">System Admins</h3>
-        <div style="flex:1"></div>
-        <button class="btn btn-primary btn-sm" onclick="showCreateUser('admin')">+ Create Admin</button>
+      <div class="card-header" style="background:#fafafa;display:flex;align-items:center;">
+        <h3 style="margin:0; font-size:16px;">Admins</h3>
+        <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showCreateUser('admin')">+ Create Admin</button>
       </div>
       <div class="card-body" style="padding:0">${adminTable(admins, 'admin')}</div>
     </div>
   `);
 
+  // Grouping logic for the Classes tab
+  const classGroups = {};
+  students.forEach(s => {
+    const g = s.grade || 'Unassigned';
+    if (!classGroups[g]) classGroups[g] = [];
+    classGroups[g].push(s);
+  });
+
+  const sortedGrades = Object.keys(classGroups).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+  const classDirEl = document.getElementById('classDirectoryBody');
+  if (classDirEl) {
+    classDirEl.innerHTML = `
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; padding: 10px;">
+        ${sortedGrades.map(grade => `
+          <div class="card" style="cursor:pointer; border:1.5px solid var(--border); transition: all 0.2s;" 
+               onclick="execShowGradeStudents('${escHtml(grade)}')"
+               onmouseover="this.style.transform='translateY(-3px)'; this.style.borderColor='var(--primary)';"
+               onmouseout="this.style.transform='none'; this.style.borderColor='var(--border)';">
+            <div style="padding:20px; text-align:center;">
+              <div style="font-size:24px; margin-bottom:8px;">🏫</div>
+              <div style="font-weight:700; color:var(--primary-dark); font-size:15px;">${escHtml(grade)}</div>
+              <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">${classGroups[grade].length} Students Enrolled</div>
+            </div>
+            <div style="background:var(--primary-light); padding:8px; text-align:center; font-size:11px; font-weight:700; color:var(--primary);">
+              VIEW CLASS LIST
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
   const tabToShow = document.getElementById(activeTab) ? activeTab : 'tab-teachers';
   const btnToActivate = document.getElementById('tbtn-' + tabToShow);
   if (btnToActivate) switchTab(btnToActivate, tabToShow);
 }
-
 function roleToTab(role) {
   return { teacher: 'tab-teachers', student: 'tab-students', sub_admin: 'tab-subadmins', admin: 'tab-admins', super_admin: 'tab-admins' }[role] || 'tab-teachers';
 }
@@ -1024,7 +932,7 @@ async function loadAdminFees() {
         <table style="width:100%; font-size:13px; margin-bottom:16px;">
           <thead><tr>
             <th style="text-align:left; padding-bottom:8px;">Grade</th>
-            <th style="text-align:right; padding-bottom:8px;">Monthly Tuition (LKR)</th>
+            <th style="text-align:right; padding-bottom:8px;">Monthly Fee (LKR)</th>
             <th style="text-align:right; padding-bottom:8px;">Action</th>
           </tr></thead>
           <tbody>
@@ -1143,7 +1051,7 @@ window.openPaymentPortal = async (sid, name) => {
         <div class="form-group">
           <label>Payment Type</label>
           <select id="payType" class="form-control" onchange="togglePayFields(${data.master_fee})">
-            <option value="monthly">Monthly Tuition</option>
+            <option value="monthly">Monthly Fee</option>
             <option value="extra">Other / Extra Fee</option>
           </select>
         </div>
@@ -1219,7 +1127,7 @@ window.processDirectPayment = async (sid) => {
         const monthVal = document.getElementById('payMonth').value;
         if (!monthVal) return showToast('Please select a month', 'error');
         fd.append('fee_month', monthVal);
-        fd.append('payment_for', 'Monthly Tuition');
+        fd.append('payment_for', 'Monthly Fee');
     } else {
         const descVal = document.getElementById('payDesc').value;
         if (!descVal) return showToast('Please enter a description', 'error');
@@ -1332,7 +1240,7 @@ window.printPaymentReceipt = async (pid, sid) => {
     if(!p) return;
     
     const win = window.open('', '_blank');
-    const displayType = p.payment_type === 'monthly' ? `Monthly Tuition (${p.fee_month})` : p.payment_for;
+    const displayType = p.payment_type === 'monthly' ? `Monthly Fee (${p.fee_month})` : p.payment_for;
     
     win.document.write(`
         <html><head><title>Receipt - ${p.receipt_number || p.id}</title>
