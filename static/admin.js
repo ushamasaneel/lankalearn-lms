@@ -78,14 +78,91 @@ async function loadAdminDashboard() {
       </div>
     </div>
   `);
-}
 
-function roleBadge(role) {
-  return role === 'admin' ? 'badge-red' : role === 'teacher' ? 'badge-purple' : 'badge-blue';
+  // --- NEW: Add Audit Logs if user is a full Admin ---
+// --- UPGRADED: Advanced Audit Logs with Dropdown Filters ---
+  if (currentUser.role === 'admin' || currentUser.role === 'super_admin') {
+    const logsContainer = document.createElement('div');
+    logsContainer.innerHTML = `
+      <div class="card" style="margin-top:24px;">
+        <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; background:#fafafa;">
+          <span class="card-title">🛡️ System Audit Logs</span>
+          <div style="display:flex; gap:10px;">
+            <select id="logUserFilter" onchange="window.filterLogs()" class="form-control" style="padding:4px 8px; font-size:13px; min-width:140px;">
+              <option value="all">👥 All Staff</option>
+            </select>
+            <select id="logActionFilter" onchange="window.filterLogs()" class="form-control" style="padding:4px 8px; font-size:13px; min-width:140px;">
+              <option value="all">⚡ All Actions</option>
+            </select>
+          </div>
+        </div>
+        <div class="card-body" style="padding:0; max-height: 400px; overflow-y: auto;">
+          <table style="width:100%; font-size:13px; border-collapse: collapse;">
+            <thead style="position:sticky; top:0; background:#f8fafc; z-index:1; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+              <tr><th style="padding:12px;">Date & Time</th><th style="padding:12px;">Staff Member</th><th style="padding:12px;">Action Performed</th><th style="padding:12px;">Specific Details</th></tr>
+            </thead>
+            <tbody id="auditLogsBody">
+              <tr><td colspan="4" style="text-align:center; padding:20px;">Loading logs...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+    document.querySelector('.page-header').parentElement.appendChild(logsContainer);
+
+    api('/api/admin/logs').then(logs => {
+      window._allLogs = logs;
+      const tbody = document.getElementById('auditLogsBody');
+      const userFilter = document.getElementById('logUserFilter');
+      const actionFilter = document.getElementById('logActionFilter');
+
+      if (!logs || !logs.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-muted" style="text-align:center; padding:20px;">No actions logged yet.</td></tr>';
+        return;
+      }
+
+      const uniqueUsers = [...new Set(logs.map(l => l.full_name))];
+      const uniqueActions = [...new Set(logs.map(l => l.action))];
+
+      uniqueUsers.forEach(u => userFilter.innerHTML += `<option value="${escHtml(u)}">${escHtml(u)}</option>`);
+      uniqueActions.forEach(a => actionFilter.innerHTML += `<option value="${escHtml(a)}">${escHtml(a)}</option>`);
+
+      window.renderLogs = (filteredLogs) => {
+        if (!filteredLogs.length) {
+          tbody.innerHTML = '<tr><td colspan="4" class="text-muted" style="text-align:center; padding:20px;">No logs match your filter.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = filteredLogs.map(l => `
+          <tr style="border-bottom: 1px solid #f1f5f9;">
+            <td style="white-space:nowrap; color:#64748b; padding:12px;">
+              <strong>${new Date(l.created_at).toLocaleDateString('en-US', {month:'short', day:'numeric'})}</strong><br>
+              <span style="font-size:11px;">${new Date(l.created_at).toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'})}</span>
+            </td>
+            <td style="padding:12px;">
+              <div style="font-weight:600; color:#0f172a;">${escHtml(l.full_name)}</div>
+              <span class="badge ${l.role === 'sub_admin' ? 'badge-blue' : 'badge-red'}" style="font-size:10px; padding:2px 6px;">${l.role.replace('_', ' ')}</span>
+            </td>
+            <td style="padding:12px;"><span style="font-weight:600; color:#1e40af; background:#eff6ff; padding:4px 8px; border-radius:6px; font-size:12px;">${escHtml(l.action)}</span></td>
+            <td style="color:#334155; line-height:1.4; padding:12px;">${escHtml(l.details)}</td>
+          </tr>
+        `).join('');
+      };
+
+      window.filterLogs = () => {
+        const u = userFilter.value;
+        const a = actionFilter.value;
+        const filtered = window._allLogs.filter(l => (u === 'all' || l.full_name === u) && (a === 'all' || l.action === a));
+        window.renderLogs(filtered);
+      };
+
+      window.renderLogs(logs);
+    });
+  }
 }
 
 // ---- Users ----
 // activeTab: 'tab-teachers' | 'tab-students' | 'tab-admins'
+// activeTab: 'tab-teachers' | 'tab-students' | 'tab-admins' | 'tab-subadmins'
 async function loadAdminUsers(activeTab) {
   if (!activeTab) {
     const cur = document.querySelector('.tab-panel[style*="display: block"], .tab-panel.active:not([style*="display: none"])');
@@ -99,9 +176,10 @@ async function loadAdminUsers(activeTab) {
   // Cache for editing
   window._adminUsers = users;
 
-  const teachers = users.filter(u => u.role === 'teacher');
-  const students = users.filter(u => u.role === 'student');
-  const admins   = users.filter(u => u.role === 'admin');
+  const teachers  = users.filter(u => u.role === 'teacher');
+  const students  = users.filter(u => u.role === 'student');
+  const admins    = users.filter(u => u.role === 'admin' || u.role === 'super_admin');
+  const subAdmins = users.filter(u => u.role === 'sub_admin'); // NEW: Filter out sub admins
 
   // ---- Teacher table with mass-select ----
   function teacherTable(list) {
@@ -148,6 +226,7 @@ async function loadAdminUsers(activeTab) {
                 ${isYou ? '<span class="text-muted text-sm">You</span>' : `
                   <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'teacher')">Edit</button>
                   <button class="btn btn-secondary btn-sm" onclick="printUserProfile(${u.id})" title="Print Profile">🖨️</button>
+                  <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')">Reset PW</button>
                   <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
                 `}
               </td>
@@ -230,6 +309,7 @@ async function loadAdminUsers(activeTab) {
                 <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'student')">Edit</button>
                 <button class="btn btn-sm" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="showStudentFees(${u.id},'${escHtml(u.full_name)}')">💰 Fees</button>
                 <button class="btn btn-secondary btn-sm" onclick="printUserProfile(${u.id})" title="Print Profile">🖨️</button>
+                <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')">Reset PW</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
               </td>
             </tr>`;
@@ -238,7 +318,7 @@ async function loadAdminUsers(activeTab) {
       </table>`;
   }
 
-  function adminTable(list) {
+function adminTable(list, roleLabel) {
     if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
     return `<table><thead><tr><th>Profile</th><th>Details</th><th>Contact / Extra</th><th>Actions</th></tr></thead>
     <tbody>${list.map(u => {
@@ -246,21 +326,22 @@ async function loadAdminUsers(activeTab) {
       const imgHtml = imgUrl ? `<img src="${imgUrl}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">` : `<div class="user-avatar" style="width:40px;height:40px;font-size:16px;">${u.full_name.charAt(0)}</div>`;
       return `<tr>
         <td style="width:60px;text-align:center;">${imgHtml}</td>
-        <td><strong>${escHtml(u.full_name)}</strong><br><code>${escHtml(u.username)}</code></td>
+        <td><strong>${escHtml(u.full_name)}</strong><br><code>${escHtml(u.username)}</code><br><span class="badge badge-purple" style="margin-top:4px">${u.role}</span></td>
         <td><div class="text-sm">${u.phone ? `<strong>Phone:</strong> ${escHtml(u.phone)}<br>` : ''}${u.notes ? `<strong>Notes:</strong> ${escHtml(u.notes)}` : ''}</div></td>
-        <td>${u.id !== currentUser.id ? `<button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'admin')">Edit</button>` : '<span class="text-muted text-sm">You</span>'}</td>
+        <td>${u.id !== currentUser.id ? `<button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'${roleLabel}')">Edit</button> <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')">Reset PW</button> <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>` : '<span class="text-muted text-sm">You</span>'}</td>
       </tr>`;
     }).join('')}</tbody></table>`;
   }
 
   setContent(`
     <div class="page-header page-header-row">
-      <div><h1>👥 Users</h1><p>Manage teachers and students</p></div>
+      <div><h1>👥 Users</h1><p>Manage all accounts in the system</p></div>
     </div>
 
     <div class="tabs">
       <button class="tab-btn" id="tbtn-tab-teachers" onclick="switchTab(this,'tab-teachers')">👨‍🏫 Teachers (${teachers.length})</button>
       <button class="tab-btn" id="tbtn-tab-students" onclick="switchTab(this,'tab-students')">🎒 Students (${students.length})</button>
+      <button class="tab-btn" id="tbtn-tab-subadmins" onclick="switchTab(this,'tab-subadmins')">🏢 Office Staff (${subAdmins.length})</button>
       <button class="tab-btn" id="tbtn-tab-admins" onclick="switchTab(this,'tab-admins')">🔐 Admins (${admins.length})</button>
     </div>
 
@@ -282,8 +363,22 @@ async function loadAdminUsers(activeTab) {
       <div class="card-body" style="padding:0">${studentTable(students)}</div>
     </div>
 
+    <div id="tab-subadmins" class="tab-panel card" style="display:none">
+      <div class="card-header" style="background:#fafafa;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <h3 style="margin:0; font-size:16px;">Office Staff (Sub Admins)</h3>
+        <div style="flex:1"></div>
+        <button class="btn btn-primary btn-sm" onclick="showCreateUser('sub_admin')">+ Create Office Staff</button>
+      </div>
+      <div class="card-body" style="padding:0">${adminTable(subAdmins, 'sub_admin')}</div>
+    </div>
+
     <div id="tab-admins" class="tab-panel card" style="display:none">
-      <div class="card-body" style="padding:0">${adminTable(admins)}</div>
+       <div class="card-header" style="background:#fafafa;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <h3 style="margin:0; font-size:16px;">System Admins</h3>
+        <div style="flex:1"></div>
+        <button class="btn btn-primary btn-sm" onclick="showCreateUser('admin')">+ Create Admin</button>
+      </div>
+      <div class="card-body" style="padding:0">${adminTable(admins, 'admin')}</div>
     </div>
   `);
 
@@ -293,8 +388,9 @@ async function loadAdminUsers(activeTab) {
   if (btnToActivate) switchTab(btnToActivate, tabToShow);
 }
 
+// Update the roleToTab helper so it remembers the new tabs!
 function roleToTab(role) {
-  return { teacher: 'tab-teachers', student: 'tab-students', admin: 'tab-admins' }[role] || 'tab-teachers';
+  return { teacher: 'tab-teachers', student: 'tab-students', sub_admin: 'tab-subadmins', admin: 'tab-admins', super_admin: 'tab-admins' }[role] || 'tab-teachers';
 }
 
 function switchTab(btn, tabId) {
@@ -1094,3 +1190,28 @@ window.printMasterFeeReport = async () => {
     </table><script>window.onload=()=>window.print()</script></body></html>`);
   win.document.close();
 };
+
+
+// Helper function to color the role badges on the dashboard
+function roleBadge(role) {
+  if (role === 'admin' || role === 'super_admin') return 'badge-red';
+  if (role === 'sub_admin') return 'badge-blue';
+  if (role === 'teacher') return 'badge-purple';
+  return 'badge-blue'; // Default for students
+}
+
+
+async function resetUserPassword(uid, name) {
+    if (!confirm(`Reset password for ${name}? This will generate a new temporary password.`)) return;
+    try {
+        const res = await apiPost(`/api/admin/users/${uid}/reset-password`);
+        openModal('Password Reset Successful', `
+            <div class="alert alert-success">
+                <strong>Temporary Password for ${escHtml(name)}:</strong><br>
+                <code style="font-size:24px; display:block; margin:10px 0;">${res.temp_password}</code>
+                Please copy this and give it to the user. They will be forced to change it upon login.
+            </div>
+            <button class="btn btn-primary w-full" onclick="closeModal()">Done</button>
+        `);
+    } catch (e) { showToast(e.message, 'error'); }
+}

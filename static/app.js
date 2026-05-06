@@ -23,8 +23,32 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   buildSidebar();
 
-  // Route to default view
-  if (currentUser.role === 'admin') loadAdminDashboard();
+  if (currentUser.must_change_password) {
+      openModal('Security Required', `
+          <div class="alert alert-warn mb-16">You are using a temporary password. You must set a private password to continue.</div>
+          <div class="form-group">
+              <label>New Password</label>
+              <input type="password" id="forceNewPw" class="form-control" placeholder="Enter new password">
+          </div>
+          <button class="btn btn-primary w-full mt-8" onclick="submitForcedPassword()">Update Password</button>
+      `, 'modal-box');
+      
+      window.submitForcedPassword = async () => {
+          const pw = document.getElementById('forceNewPw').value;
+          if (pw.length < 6) { showToast('Password must be at least 6 characters', 'error'); return; }
+          const fd = new FormData(); fd.append('new_password', pw);
+          try {
+              await apiPost('/api/auth/change-password', fd);
+              closeModal(); showToast('Password updated!', 'success');
+              currentUser.must_change_password = false;
+          } catch (e) { showToast(e.message, 'error'); }
+      };
+  }
+
+ // Route to default view based on role
+  if (currentUser.role === 'admin' || currentUser.role === 'sub_admin' || currentUser.role === 'super_admin') {
+      loadAdminDashboard();
+  }
   else if (currentUser.role === 'teacher') loadTeacherDashboard();
   else loadStudentDashboard();
 });
@@ -56,9 +80,10 @@ function setActiveSidebar(id) {
 }
 
 // ---- Build sidebar by role ----
+// ---- Build sidebar by role ----
 function buildSidebar() {
   const nav = document.getElementById('sidebarNav');
-  if (currentUser.role === 'admin') {
+  if (currentUser.role === 'admin' || currentUser.role === 'sub_admin' || currentUser.role === 'super_admin') {
     nav.innerHTML = `
       <div class="sidebar-heading">Administration</div>
       <div class="sidebar-item" id="si-dash" onclick="loadAdminDashboard(); setActiveSidebar('dash')">
@@ -78,8 +103,10 @@ function buildSidebar() {
       <div class="sidebar-item" id="si-cal" onclick="loadCalendar(); setActiveSidebar('cal')">
         <span class="si-icon">📅</span> Calendar
       </div>
+      <div class="sidebar-item" id="si-help" onclick="loadFAQ(); setActiveSidebar('help')">
+        <span class="si-icon">❓</span> Help & Support
+      </div>
     `;
-// ... rest of the function remains the same
   } else if (currentUser.role === 'teacher') {
     nav.innerHTML = `
       <div class="sidebar-heading">Teaching</div>
@@ -88,6 +115,9 @@ function buildSidebar() {
       </div>
       <div class="sidebar-item" id="si-tcal" onclick="loadCalendar(); setActiveSidebar('tcal')">
         <span class="si-icon">📅</span> Calendar
+      </div>
+      <div class="sidebar-item" id="si-help" onclick="loadFAQ(); setActiveSidebar('help')">
+        <span class="si-icon">❓</span> Help & Support
       </div>
       <div class="sidebar-divider"></div>
       <div class="sidebar-heading">My Courses</div>
@@ -105,6 +135,9 @@ function buildSidebar() {
       </div>
       <div class="sidebar-item" id="si-sfees" onclick="loadStudentFees(); setActiveSidebar('sfees')">
         <span class="si-icon">💰</span> Fees
+      </div>
+      <div class="sidebar-item" id="si-help" onclick="loadFAQ(); setActiveSidebar('help')">
+        <span class="si-icon">❓</span> Help & Support
       </div>
       <div class="sidebar-divider"></div>
       <div class="sidebar-heading">My Courses</div>
@@ -472,3 +505,156 @@ function renderMobileSubNav(courseId) {
   courseItem.after(subNav);
 }
 
+
+// ================================================================
+// HELP & SUPPORT (FAQ)
+// ================================================================
+
+// ================================================================
+// HELP & SUPPORT (FAQ & CONTACT)
+// ================================================================
+
+function loadFAQ() {
+  setPageTitle('Help & Support');
+  setActiveSidebar('help');
+
+  let faqs = [];
+
+  if (currentUser.role === 'admin') {
+    faqs = [
+      { q: "How do I add a new user?", a: "Go to Users > Select the Teacher or Student tab > Click '+ Create'." },
+      { q: "How do I enroll students in a course?", a: "Go to Courses > Click 'Students' on a course card > Use the 'Add Students' panel." },
+      { q: "How do I record a fee payment?", a: "Go to Fees > Click 'Manage Fees & Receipts' for a student > Click '+ Record Payment'." },
+      { q: "How do I print a fee receipt?", a: "In the student's Fee modal, click the 🖨️ icon next to the specific payment in the history table." },
+      { q: "How do I add a school holiday?", a: "Go to Calendar > Click '+ Add Event' > Select 'Global School Event'." },
+      { q: "How do I reset a user's password?", a: "Go to Users > Click 'Edit' on the user > Type a new password in the password field and save." }
+    ];
+  } else if (currentUser.role === 'teacher') {
+    faqs = [
+      { q: "How do I create a quiz?", a: "Open your course > Go to Quizzes > Click 'Create New Quiz' > Add questions and save." },
+      { q: "How do I mark attendance?", a: "Open your course > Go to Attendance > Select the date > Mark Present/Absent/Late > Click 'Save Attendance'." },
+      { q: "How do I grade an assignment?", a: "Open your course > Go to Assignments > Click 'Submissions' > Enter the marks and feedback > Click 'Save'." },
+      { q: "How do I upload lecture notes?", a: "Open your course > Go to Modules > Open a module > Click '+ Add Item' > Upload your file." },
+      { q: "How do I notify my students?", a: "Go to Announcements in your course and click '+ Post Announcement'." }
+    ];
+  } else if (currentUser.role === 'student') {
+    faqs = [
+      { q: "How do I submit an assignment?", a: "Open the course > Go to Assignments > Click 'Submit Assignment' > Upload your file or type your answer." },
+      { q: "How do I take a quiz?", a: "Open the course > Go to Quizzes > Click 'Take Quiz'. Note the time limit before starting." },
+      { q: "Where can I see my grades?", a: "Click on 'Grades' inside your course to see your overall average and individual scores." },
+      { q: "How do I check my fee payments?", a: "Click 'Fees' in the main left sidebar to view your payment history and print statements." },
+      { q: "How do I view the course syllabus?", a: "Open the course and click the 'Syllabus' tab." }
+    ];
+  }
+
+  const faqHtml = faqs.map(f => `
+    <details style="background:white; border:1px solid var(--border); border-radius:8px; margin-bottom:12px; padding:16px; box-shadow:0 1px 2px rgba(0,0,0,0.02);">
+      <summary style="font-weight:700; cursor:pointer; color:var(--primary-dark); outline:none; font-size:15px;">
+        ${f.q}
+      </summary>
+      <div style="margin-top:12px; font-size:14px; color:var(--text); line-height:1.6; padding-left:18px; border-left:2px solid var(--border);">
+        ${f.a}
+      </div>
+    </details>
+  `).join('');
+
+  setContent(`
+    <div class="page-header page-header-row">
+      <div>
+        <h1>❓ Help & Support</h1>
+        <p>Frequently asked questions and guides for your role.</p>
+      </div>
+    </div>
+    
+    <div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start;">
+      <div style="flex: 1; min-width: 300px;">
+        <h3 style="margin-bottom:16px; font-size:18px;">Frequently Asked Questions</h3>
+        ${faqHtml}
+      </div>
+
+      <div class="card" style="width: 350px; flex-shrink: 0;">
+        <div class="card-header"><span class="card-title">📞 Contact Administration</span></div>
+        <div class="card-body">
+          <p class="text-sm text-muted mb-16">Need further assistance? Reach out to the school administration directly.</p>
+          
+          <div style="margin-bottom: 24px; font-size: 13.5px; line-height: 1.6;">
+            <div><strong>📧 Email:</strong> support@lankalearn.lk</div>
+            <div><strong>📱 Phone:</strong> +94 11 234 5678</div>
+            <div><strong>⏰ Hours:</strong> Mon - Fri, 8:00 AM - 4:00 PM</div>
+          </div>
+
+          <form id="supportForm" onsubmit="submitSupportTicket(event)">
+            <div class="form-group">
+              <label>Subject</label>
+              <input type="text" id="supportSubject" class="form-control" placeholder="Briefly describe the issue" required>
+            </div>
+            <div class="form-group">
+              <label>Message</label>
+              <textarea id="supportMessage" class="form-control" style="min-height: 100px;" placeholder="How can we help you?" required></textarea>
+            </div>
+            <button type="submit" id="supportBtn" class="btn btn-primary w-full">✉️ Send Message</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  `);
+
+  window.submitSupportTicket = (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('supportBtn');
+    btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:6px"></div> Sending...';
+    btn.disabled = true;
+
+    // Simulate network request
+    setTimeout(() => {
+      document.getElementById('supportSubject').value = '';
+      document.getElementById('supportMessage').value = '';
+      btn.innerHTML = '✉️ Send Message';
+      btn.disabled = false;
+      showToast('Your message has been sent to support!', 'success');
+    }, 1000);
+  };
+}
+
+function toggleAiChat() {
+    const box = document.getElementById('aiChatBox');
+    if (!box) return;
+    box.style.display = (box.style.display === 'none' || box.style.display === '') ? 'flex' : 'none';
+}
+
+async function sendAiMessage() {
+    const input = document.getElementById('aiInput');
+    const content = document.getElementById('aiChatContent');
+    const msg = input.value.trim();
+    if (!msg) return;
+
+    // 1. Show your message
+    content.innerHTML += `<div style="align-self:flex-end; background:#1e40af; color:white; padding:8px 12px; border-radius:12px 12px 0 12px; max-width:80%;">${msg}</div>`;
+    input.value = '';
+    content.scrollTop = content.scrollHeight;
+
+    // 2. Show loading dots
+    const loadingId = 'ai-load-' + Date.now();
+    content.innerHTML += `<div id="${loadingId}" style="align-self:flex-start; background:#e2e8f0; padding:8px 12px; border-radius:12px 12px 12px 0;">...</div>`;
+    content.scrollTop = content.scrollHeight;
+
+    try {
+        const res = await fetch('/api/ai/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: msg })
+        });
+        const data = await res.json();
+        
+        // Remove loading dots
+        const loadEl = document.getElementById(loadingId);
+        if (loadEl) loadEl.remove();
+        
+        // 3. Show AI reply
+        content.innerHTML += `<div style="align-self:flex-start; background:#ffffff; border:1px solid #e2e8f0; padding:8px 12px; border-radius:12px 12px 12px 0; max-width:80%; box-shadow:0 2px 4px rgba(0,0,0,0.05);">${data.reply}</div>`;
+        content.scrollTop = content.scrollHeight;
+    } catch (e) {
+        const loadEl = document.getElementById(loadingId);
+        if (loadEl) loadEl.innerText = "Connection error. Please try again.";
+    }
+}

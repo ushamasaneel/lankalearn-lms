@@ -8,6 +8,31 @@
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/styles.css">
 </head>
+
+
+<div id="aiChatWrapper" style="position:fixed; bottom:20px; right:20px; z-index:2000;">
+    <button onclick="toggleAiChat()" style="width:60px; height:60px; border-radius:50%; background:#1e40af; color:white; border:none; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.2); font-size:24px; display:flex; align-items:center; justify-content:center;">
+        🤖
+    </button>
+    
+    <div id="aiChatBox" style="display:none; position:absolute; bottom:80px; right:0; width:350px; height:450px; background:white; border-radius:15px; box-shadow:0 10px 25px rgba(0,0,0,0.15); flex-direction:column; overflow:hidden; border:1px solid #e2e8f0;">
+        <div style="background:#1e3a8a; color:white; padding:15px; font-weight:700; display:flex; justify-content:space-between; align-items:center;">
+            <span>LankaBot Assistant</span>
+            <span onclick="toggleAiChat()" style="cursor:pointer; font-size:18px;">✕</span>
+        </div>
+        <div id="aiChatContent" style="flex:1; padding:15px; overflow-y:auto; font-size:13.5px; display:flex; flex-direction:column; gap:10px; background:#f8fafc;">
+            <div style="align-self:flex-start; background:white; border:1px solid #e2e8f0; padding:8px 12px; border-radius:12px 12px 12px 0;">
+                Ayubowan! I'm LankaBot. How can I help you today?
+            </div>
+        </div>
+        <div style="padding:10px; border-top:1px solid #e2e8f0; display:flex; gap:8px; background:white;">
+            <input type="text" id="aiInput" class="form-control" placeholder="Ask about deadlines..." onkeypress="if(event.key==='Enter') sendAiMessage()" style="flex:1; padding:8px; border:1px solid #ddd; border-radius:8px;">
+            <button class="btn btn-primary" onclick="sendAiMessage()" style="padding:8px 15px; background:#1e40af; color:white; border:none; border-radius:8px; cursor:pointer;">Send</button>
+        </div>
+    </div>
+</div>
+
+
 <body>
 
 <header class="top-header">

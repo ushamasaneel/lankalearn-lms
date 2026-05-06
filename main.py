@@ -8,6 +8,7 @@ import os
 import uuid
 import shutil
 import hashlib
+import bcrypt
 import psycopg2
 from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
@@ -16,10 +17,17 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from dotenv import load_dotenv # Add this import
 import uvicorn
 from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request, Response, File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+
+
+from typing import Optional
+import google.generativeai as genai  # Add this here
+
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # App setup & File Storage
@@ -39,6 +47,15 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 SESSIONS: dict[str, int] = {}
+
+API_KEY = os.environ.get("GEMINI_API_KEY")
+
+# Configure AI with the secret key
+if API_KEY:
+    # Adding transport='rest' fixes the gRPC/StatusCode.NOT_FOUND errors on Windows
+    genai.configure(api_key=API_KEY, transport='rest')
+else:
+    print("Warning: GEMINI_API_KEY not found in environment variables.")
 
 # ---------------------------------------------------------------------------
 # DB & General helpers
@@ -98,8 +115,20 @@ def execute(sql: str, params=(), *, db=None):
         if close:
             DB_POOL.putconn(db)
 
+
+
 def hash_pw(pw: str) -> str:
-    return hashlib.sha256(pw.encode()).hexdigest()
+    # Bcrypt strictly limits passwords to 72 bytes. We safely truncate to prevent crashes.
+    return bcrypt.hashpw(pw[:72].encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+def verify_pw(plain_pw: str, hashed_pw: str) -> bool:
+    # Allows old sha256 passwords to still work during transition
+    if hashlib.sha256(plain_pw.encode()).hexdigest() == hashed_pw:
+        return True
+    try:
+        return bcrypt.checkpw(plain_pw[:72].encode('utf-8'), hashed_pw.encode('utf-8'))
+    except Exception:
+        return False
 
 def now_str() -> str:
     return datetime.now().isoformat(sep=" ", timespec="seconds")
@@ -205,9 +234,9 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     full_name TEXT NOT NULL,
     role TEXT NOT NULL CHECK(role IN ('admin','teacher','student')),
+    must_change_password BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
 
 CREATE TABLE IF NOT EXISTS attendance (
     id SERIAL PRIMARY KEY,
@@ -494,11 +523,11 @@ def init_db():
     db.commit()
 
     if query("SELECT id FROM users LIMIT 1", db=db):
-        db.close()
+        DB_POOL.putconn(db)
         return
 
     seed(db)
-    db.close()
+    DB_POOL.putconn(db)
 
 
 def seed(db):
@@ -682,17 +711,19 @@ def dashboard():
 # Auth API
 # ---------------------------------------------------------------------------
 
+
+
 @app.post("/api/auth/login")
 def login(response: Response, username: str = Form(...), password: str = Form(...)):
-    user = query("SELECT * FROM users WHERE username=? AND password_hash=?",
-                 (username, hash_pw(password)), one=True)
-    if not user:
+    user = query("SELECT * FROM users WHERE username=?", (username,), one=True)
+    if not user or not verify_pw(password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     sid = str(uuid.uuid4())
     SESSIONS[sid] = user["id"]
     response.set_cookie("session_id", sid, httponly=True, samesite="lax")
     return {"id": user["id"], "username": user["username"],
-            "full_name": user["full_name"], "role": user["role"]}
+            "full_name": user["full_name"], "role": user["role"],
+            "must_change_password": user.get("must_change_password", False)}
 
 @app.post("/api/auth/logout")
 def logout(response: Response, session_id: Optional[str] = Cookie(default=None)):
@@ -704,14 +735,31 @@ def logout(response: Response, session_id: Optional[str] = Cookie(default=None))
 @app.get("/api/auth/me")
 def me(user=Depends(require_user)):
     return {"id": user["id"], "username": user["username"],
-            "full_name": user["full_name"], "role": user["role"]}
+            "full_name": user["full_name"], "role": user["role"],
+            "must_change_password": user.get("must_change_password", False)}
+
+
+
+@app.post("/api/auth/change-password")
+def change_password(new_password: str = Form(...), user=Depends(require_user)):
+    execute("UPDATE users SET password_hash=?, must_change_password=FALSE WHERE id=?", 
+            (hash_pw(new_password), user["id"]))
+    return {"ok": True}
+
+@app.post("/api/admin/users/{uid}/reset-password")
+def admin_reset_pw(uid: int, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
+    temp_pw = str(uuid.uuid4())[:8] # Generates an 8-character temp password
+    execute("UPDATE users SET password_hash=?, must_change_password=TRUE WHERE id=?", 
+            (hash_pw(temp_pw), uid))
+    log_audit(user["id"], "Reset Password", f"User ID: {uid}")
+    return {"temp_password": temp_pw}
 
 # ---------------------------------------------------------------------------
 # Admin API
 # ---------------------------------------------------------------------------
 
 @app.get("/api/admin/stats")
-def admin_stats(user=Depends(require_role("admin"))):
+def admin_stats(user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     return {
         "users":       query("SELECT COUNT(*) as c FROM users")[0]["c"],
         "courses":     query("SELECT COUNT(*) as c FROM courses")[0]["c"],
@@ -720,8 +768,7 @@ def admin_stats(user=Depends(require_role("admin"))):
     }
 
 @app.get("/api/admin/users")
-def list_users(user=Depends(require_role("admin"))):
-    # Detect which optional columns actually exist so a missing column never causes a 500
+def list_users(user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     db = get_db()
     with db.cursor() as cur:
         cur.execute("""
@@ -729,14 +776,19 @@ def list_users(user=Depends(require_role("admin"))):
             WHERE table_name = 'users'
         """)
         existing = {row[0] for row in cur.fetchall()}
-    db.close()
+    
+    DB_POOL.putconn(db) # <--- Correctly returns the connection to the pool!
+
+    optional = ["dob", "address", "phone", "notes", "profile_image", "grade", "admission_number"]
+    select_cols = ["id", "username", "full_name", "role", "created_at"] + [c for c in optional if c in existing]
+    return query(f"SELECT {', '.join(select_cols)} FROM users ORDER BY role, full_name")
 
     optional = ["dob", "address", "phone", "notes", "profile_image", "grade", "admission_number"]
     select_cols = ["id", "username", "full_name", "role", "created_at"] + [c for c in optional if c in existing]
     return query(f"SELECT {', '.join(select_cols)} FROM users ORDER BY role, full_name")
 
 @app.get("/api/admin/next-admission")
-def next_admission_number(user=Depends(require_role("admin"))):
+def next_admission_number(user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     """Return the next available admission number suggestion, e.g. LL-2026-0042"""
     year = datetime.now().year
     result = query(
@@ -758,7 +810,7 @@ def next_admission_number(user=Depends(require_role("admin"))):
 # ================================================================
 
 @app.get("/api/admin/students/{sid}/fees")
-def get_student_fees(sid: int, user=Depends(require_role("admin"))):
+def get_student_fees(sid: int, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     student = query("SELECT id, full_name, admission_number, grade FROM users WHERE id=? AND role='student'", (sid,), one=True)
     if not student: raise HTTPException(404, "Student not found")
     structure = query("SELECT * FROM student_fee_structure WHERE student_id=? ORDER BY effective_from DESC LIMIT 1", (sid,), one=True)
@@ -785,12 +837,14 @@ def set_fee_structure(
     monthly_fee: float = Form(...),
     effective_from: str = Form(...),
     notes: str = Form(""),
-    user=Depends(require_role("admin"))
+    user=Depends(require_role("admin", "sub_admin", "super_admin"))
 ):
     student = query("SELECT id FROM users WHERE id=? AND role='student'", (sid,), one=True)
     if not student: raise HTTPException(404, "Student not found")
     execute("INSERT INTO student_fee_structure(student_id, monthly_fee, effective_from, notes) VALUES(?,?,?,?)",
             (sid, monthly_fee, effective_from, notes))
+    # ADD THIS LINE:
+    log_audit(user["id"], "Set Fee Structure", f"Student ID: {sid} | Monthly Fee: {monthly_fee}")
     return {"ok": True}
 
 @app.post("/api/admin/students/{sid}/fee-payments")
@@ -802,7 +856,7 @@ def add_fee_payment(
     paid_date: str = Form(...),
     receipt_number: str = Form(""),
     notes: str = Form(""),
-    user=Depends(require_role("admin"))
+    user=Depends(require_role("admin", "sub_admin", "super_admin"))
 ):
     student = query("SELECT id FROM users WHERE id=? AND role='student'", (sid,), one=True)
     if not student: raise HTTPException(404, "Student not found")
@@ -810,10 +864,12 @@ def add_fee_payment(
         INSERT INTO student_fee_payments(student_id, amount, payment_type, payment_for, paid_date, receipt_number, notes, recorded_by)
         VALUES(?,?,?,?,?,?,?,?)
     """, (sid, amount, payment_type, payment_for, paid_date, receipt_number, notes, user["id"]))
+    # ADD THIS LINE:
+    log_audit(user["id"], "Recorded Fee Payment", f"Student ID: {sid} | Amount: {amount} | For: {payment_type}")
     return {"ok": True}
 
 @app.delete("/api/admin/fee-payments/{pid}")
-def delete_fee_payment(pid: int, user=Depends(require_role("admin"))):
+def delete_fee_payment(pid: int, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     execute("DELETE FROM student_fee_payments WHERE id=?", (pid,))
     return {"ok": True}
 
@@ -823,16 +879,27 @@ async def create_user(
     role: str = Form(...), dob: str = Form(""), address: str = Form(""), 
     phone: str = Form(""), notes: str = Form(""),
     grade: str = Form(""), admission_number: str = Form(""),
-    file: UploadFile = File(None), user=Depends(require_role("admin"))
+    file: UploadFile = File(None), user=Depends(require_role("admin", "sub_admin", "super_admin"))
 ):
-    if role not in ("teacher", "student", "admin"):
+    # 1. ALLOW THE NEW ROLES HERE
+    if role not in ("teacher", "student", "admin", "sub_admin", "super_admin"):
         raise HTTPException(400, "Invalid role")
+    
+    # --- SECURITY CHECK ---
+    if user["role"] == "sub_admin" and role in ("admin", "sub_admin", "super_admin"):
+        raise HTTPException(403, "Office staff cannot create Admin or Office Staff accounts.")
     
     saved_filename = ""
     try:
         if file and file.filename:
-            # ORGANIZED FOLDERS: uploads/profiles/teachers/Kasun_Perera/
-            folder_role = "teachers" if role == "teacher" else "students"
+            # 2. ROUTE TO THE CORRECT FOLDER
+            if role == "teacher":
+                folder_role = "teachers"
+            elif role == "student":
+                folder_role = "students"
+            else:
+                folder_role = "admins"
+                
             clean_folder_name = "".join(x for x in full_name if x.isalnum() or x == " ").replace(" ", "_")
             profile_dir = UPLOAD_DIR / "profiles" / folder_role / clean_folder_name
             profile_dir.mkdir(parents=True, exist_ok=True)
@@ -847,9 +914,12 @@ async def create_user(
                 buffer.write(content_bytes)
 
         uid = execute("""
-            INSERT INTO users(username, password_hash, full_name, role, dob, address, phone, notes, profile_image, grade, admission_number) 
-            VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO users(username, password_hash, full_name, role, dob, address, phone, notes, profile_image, grade, admission_number, must_change_password) 
+            VALUES(?,?,?,?,?,?,?,?,?,?,?, TRUE)
         """, (username, hash_pw(password), full_name, role, dob, address, phone, notes, saved_filename, grade, admission_number))
+        
+        # --- LOG ACTION ---
+        log_audit(user["id"], "Created User", f"{full_name} ({role})")
         
         return {"id": uid, "message": "User created"}
     except IntegrityError:
@@ -862,16 +932,27 @@ async def update_user(
     uid: int, full_name: str = Form(...), username: str = Form(...), password: str = Form(""), 
     dob: str = Form(""), address: str = Form(""), phone: str = Form(""), notes: str = Form(""),
     grade: str = Form(""), admission_number: str = Form(""),
-    file: UploadFile = File(None), user=Depends(require_role("admin"))
+    file: UploadFile = File(None), user=Depends(require_role("admin", "sub_admin", "super_admin"))
 ):
     target = query("SELECT role, profile_image, full_name FROM users WHERE id=?", (uid,), one=True)
     if not target: raise HTTPException(404, "User not found")
+    
+    # --- SECURITY CHECK ---
+    if user["role"] == "sub_admin" and target["role"] in ("admin", "sub_admin", "super_admin"):
+        raise HTTPException(403, "Office staff cannot edit Admin or Office Staff accounts.")
     
     saved_filename = target["profile_image"]
     
     try:
         if file and file.filename:
-            folder_role = "teachers" if target["role"] == "teacher" else "students"
+            # FIX FOLDER ROUTING HERE TOO
+            if target["role"] == "teacher":
+                folder_role = "teachers"
+            elif target["role"] == "student":
+                folder_role = "students"
+            else:
+                folder_role = "admins"
+                
             clean_folder_name = "".join(x for x in full_name if x.isalnum() or x == " ").replace(" ", "_")
             profile_dir = UPLOAD_DIR / "profiles" / folder_role / clean_folder_name
             profile_dir.mkdir(parents=True, exist_ok=True)
@@ -894,6 +975,9 @@ async def update_user(
                 UPDATE users SET full_name=?, username=?, dob=?, address=?, phone=?, notes=?, profile_image=?, grade=?, admission_number=? WHERE id=?
             """, (full_name, username, dob, address, phone, notes, saved_filename, grade, admission_number, uid))
             
+        # --- LOG ACTION ---
+        log_audit(user["id"], "Updated User", f"{full_name} ({target['role']})")
+            
         return {"ok": True}
     except IntegrityError:
         raise HTTPException(400, "Username already exists")
@@ -901,7 +985,7 @@ async def update_user(
         raise HTTPException(500, f"Failed to update user: {str(e)}")
 
 @app.delete("/api/admin/users/{uid}")
-def delete_user(uid: int, user=Depends(require_role("admin"))):
+def delete_user(uid: int, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     if uid == user["id"]:
         raise HTTPException(400, "Cannot delete yourself")
     
@@ -909,11 +993,15 @@ def delete_user(uid: int, user=Depends(require_role("admin"))):
     try:
         # We use a standard cursor here to avoid the "tuple indices" error
         with db.cursor() as cur:
-            cur.execute("SELECT role FROM users WHERE id=%s", (uid,))
+            cur.execute("SELECT role, full_name FROM users WHERE id=%s", (uid,))
             res = cur.fetchone()
             if not res: return {"ok": True}
             
-            user_role = res[0] # Fix: Access by index (0) instead of string "role"
+            user_role, user_name = res[0], res[1]
+            
+            # --- SECURITY CHECK ---
+            if user["role"] == "sub_admin" and user_role in ("admin", "sub_admin", "super_admin"):
+                raise HTTPException(403, "Office staff cannot delete Admin or Office Staff accounts.")
             
             if user_role == "teacher":
                 cur.execute("UPDATE courses SET teacher_id=NULL WHERE teacher_id=%s", (uid,))
@@ -928,17 +1016,20 @@ def delete_user(uid: int, user=Depends(require_role("admin"))):
             cur.execute("DELETE FROM discussion_posts WHERE author_id=%s", (uid,))
             cur.execute("DELETE FROM users WHERE id=%s", (uid,))
         db.commit()
+        
+        # --- LOG ACTION ---
+        log_audit(user["id"], "Deleted User", f"{user_name} ({user_role})")
+        
     except Exception as e:
         db.rollback()
         raise HTTPException(500, f"Failed to delete user: {str(e)}")
     finally:
-        db.close()
+        DB_POOL.putconn(db)
         
     return {"ok": True}
 
-
 @app.get("/api/admin/courses")
-def admin_list_courses(user=Depends(require_role("admin"))):
+def admin_list_courses(user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     return query("""
         SELECT c.*, u.full_name as teacher_name
         FROM courses c LEFT JOIN users u ON c.teacher_id=u.id
@@ -949,10 +1040,11 @@ def admin_list_courses(user=Depends(require_role("admin"))):
 def create_course(code: str = Form(...), name: str = Form(...),
                   description: str = Form(""), teacher_id: int = Form(...),
                   start_date: str = Form(""), end_date: str = Form(""),
-                  user=Depends(require_role("admin"))):
+                  user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     try:
         cid = execute("INSERT INTO courses(code,name,description,teacher_id,start_date,end_date) VALUES(?,?,?,?,?,?)",
                       (code, name, description, teacher_id, start_date, end_date))
+        log_audit(user["id"], "Created Course", f"Code: {code} | Name: {name}")
         return {"id": cid, "message": "Course created"}
     except IntegrityError:
         raise HTTPException(400, "Course code already exists")
@@ -961,16 +1053,17 @@ def create_course(code: str = Form(...), name: str = Form(...),
 def update_course(cid: int, code: str = Form(...), name: str = Form(...),
                   description: str = Form(""), teacher_id: int = Form(...),
                   start_date: str = Form(""), end_date: str = Form(""),
-                  user=Depends(require_role("admin"))):
+                  user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     try:
         execute("UPDATE courses SET code=?, name=?, description=?, teacher_id=?, start_date=?, end_date=? WHERE id=?",
                 (code, name, description, teacher_id, start_date, end_date, cid))
+        log_audit(user["id"], "Updated Course", f"Course ID: {cid} | New Name: {name}")
         return {"ok": True}
     except IntegrityError:
         raise HTTPException(400, "Course code already exists")
 
 @app.delete("/api/admin/courses/{cid}")
-def delete_course(cid: int, user=Depends(require_role("admin"))):
+def delete_course(cid: int, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     # We must manually clear all dependent data first to satisfy Database Foreign Key constraints
     db = get_db()
     try:
@@ -1016,12 +1109,14 @@ def delete_course(cid: int, user=Depends(require_role("admin"))):
         db.rollback()
         raise HTTPException(500, f"Failed to delete course: {str(e)}")
     finally:
-        db.close()
+        DB_POOL.putconn(db)
+
+    log_audit(user["id"], "Deleted Course", f"Course ID: {cid}")    
         
     return {"ok": True}
 
 @app.get("/api/admin/courses/{cid}/students")
-def course_students(cid: int, user=Depends(require_role("admin"))):
+def course_students(cid: int, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     enrolled = query("""
         SELECT u.id,u.full_name,u.username,e.enrolled_at
         FROM enrollments e JOIN users u ON e.student_id=u.id
@@ -1034,7 +1129,7 @@ def course_students(cid: int, user=Depends(require_role("admin"))):
 
 @app.post("/api/admin/courses/{cid}/enroll")
 def enroll_student(cid: int, student_id: int = Form(...),
-                   user=Depends(require_role("admin"))):
+                   user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     try:
         execute("INSERT INTO enrollments(student_id,course_id) VALUES(?,?)", (student_id, cid))
         return {"ok": True}
@@ -1042,12 +1137,12 @@ def enroll_student(cid: int, student_id: int = Form(...),
         raise HTTPException(400, "Already enrolled")
 
 @app.delete("/api/admin/courses/{cid}/enroll/{sid}")
-def unenroll_student(cid: int, sid: int, user=Depends(require_role("admin"))):
+def unenroll_student(cid: int, sid: int, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     execute("DELETE FROM enrollments WHERE course_id=? AND student_id=?", (cid, sid))
     return {"ok": True}
 
 @app.get("/api/admin/teachers")
-def list_teachers(user=Depends(require_role("admin"))):
+def list_teachers(user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     return query("SELECT id,full_name FROM users WHERE role='teacher' ORDER BY full_name")
 
 # ---------------------------------------------------------------------------
@@ -1131,7 +1226,7 @@ def get_modules(cid: int, user=Depends(require_user)):
             mod["items"] = items
         return mods
     finally:
-        db.close()
+        DB_POOL.putconn(db)
 
 @app.get("/api/courses/{cid}/announcements")
 def get_announcements(cid: int, user=Depends(require_user)):
@@ -1736,7 +1831,7 @@ def gradebook(cid: int, user=Depends(require_role("teacher"))):
             
         return {"students": students, "assignments": all_items}
     finally:
-        db.close()
+        DB_POOL.putconn(db)
 # ---------------------------------------------------------------------------
 # Discussions
 # ---------------------------------------------------------------------------
@@ -1891,7 +1986,7 @@ async def add_quiz_question(cid: int, qid: int, request: Request, user=Depends(r
                     (q_id, opt['text'], opt['is_correct']), db=db)
     finally:
         # Close it once at the very end
-        db.close()
+        DB_POOL.putconn(db)
         
     return {"ok": True}
 
@@ -1960,6 +2055,10 @@ def fix_database():
                 except Exception as e:
                     results.append(f"SKIP {table}.{col}: {e}")
 
+
+            # Inside your fix_database() try block, add:
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE;")        
+
             # ---- Fee structure table ----
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS student_fee_structure (
@@ -2021,23 +2120,88 @@ def fix_database():
         db.rollback()
         return {"status": "Error", "details": str(e)}
     finally:
-        db.close()
+        DB_POOL.putconn(db)
+
+
+
+@app.get("/fix-roles")
+def fix_roles():
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            # Drop the old 3-role constraint
+            cur.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;")
+            
+            # Apply the new 5-role constraint based on your architecture
+            cur.execute("""
+                ALTER TABLE users ADD CONSTRAINT users_role_check 
+                CHECK(role IN ('super_admin', 'admin', 'sub_admin', 'teacher', 'student'));
+            """)
+        db.commit()
+        return {"status": "SUCCESS! The 5-tier role system is now active in the database."}
+    except Exception as e:
+        db.rollback()
+        return {"status": "Error", "details": str(e)}
+    finally:
+        DB_POOL.putconn(db)
+
+
+
+def log_audit(user_id: int, action: str, details: str = ""):
+    """Helper function to record admin and sub-admin actions"""
+    try:
+        execute("INSERT INTO audit_logs(user_id, action, details) VALUES(?,?,?)", (user_id, action, details))
+    except Exception as e:
+        print(f"Audit log failed: {e}") # Fails silently if table doesn't exist yet
+
+@app.get("/fix-logs")
+def fix_logs():
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS audit_logs (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    action TEXT NOT NULL,
+                    details TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+        db.commit()
+        return {"status": "SUCCESS! Audit logs table created."}
+    except Exception as e:
+        db.rollback()
+        return {"status": "Error", "details": str(e)}
+    finally:
+        DB_POOL.putconn(db)
+
+@app.get("/api/admin/logs")
+def get_audit_logs(user=Depends(require_role("admin", "super_admin"))):
+    """Only Admins and Super Admins can view the logs"""
+    return query("""
+        SELECT l.*, u.full_name, u.role
+        FROM audit_logs l LEFT JOIN users u ON l.user_id = u.id
+        ORDER BY l.created_at DESC LIMIT 100
+    """)        
 
 
 # --- BULK ENROLLMENT & STUDENT FEES ---
 @app.post("/api/admin/courses/{cid}/enroll/bulk")
-async def bulk_enroll(cid: int, request: Request, user=Depends(require_role("admin"))):
+async def bulk_enroll(cid: int, request: Request, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     data = await request.json()
     for sid in data.get("student_ids", []):
         try: execute("INSERT INTO enrollments(student_id,course_id) VALUES(?,?)", (sid, cid))
         except IntegrityError: pass
+        log_audit(user["id"], "Bulk Enrolled Students", f"Course ID: {cid} | Total Enrolled: {len(data.get('student_ids', []))}")
     return {"ok": True}
 
 @app.post("/api/admin/courses/{cid}/unenroll/bulk")
-async def bulk_unenroll(cid: int, request: Request, user=Depends(require_role("admin"))):
+async def bulk_unenroll(cid: int, request: Request, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     data = await request.json()
     for sid in data.get("student_ids", []):
         execute("DELETE FROM enrollments WHERE course_id=? AND student_id=?", (cid, sid))
+        log_audit(user["id"], "Bulk Unenrolled Students", f"Course ID: {cid} | Total Removed: {len(data.get('student_ids', []))}")
     return {"ok": True}
 
 @app.get("/api/student/fees")
@@ -2046,6 +2210,105 @@ def get_my_fees(user=Depends(require_role("student"))):
     structure = query("SELECT * FROM student_fee_structure WHERE student_id=? ORDER BY effective_from DESC LIMIT 1", (sid,), one=True)
     payments = query("SELECT * FROM student_fee_payments WHERE student_id=? ORDER BY paid_date DESC", (sid,))
     return {"structure": dict(structure) if structure else None, "payments": [dict(p) for p in payments]}        
+
+# ---------------------------------------------------------------------------
+# LankaBot AI Assistant (Safe Read-Only)
+# ---------------------------------------------------------------------------
+
+def get_course_info(cid: int):
+    """Fetches public description and schedule for a specific course."""
+    return query("SELECT name, description, code FROM courses WHERE id=?", (cid,), one=True)
+
+def get_deadlines(uid: int):
+    """Fetches upcoming assignment deadlines for the student."""
+    # Note: CURRENT_TIMESTAMP::text used to match your database format
+    return query("""
+        SELECT a.title, a.due_date, c.name as course 
+        FROM assignments a JOIN courses c ON a.course_id=c.id
+        JOIN enrollments e ON e.course_id=c.id
+        WHERE e.student_id=? AND a.due_date >= CURRENT_TIMESTAMP::text 
+        ORDER BY a.due_date LIMIT 5
+    """, (uid,))
+
+@app.post("/api/ai/chat")
+async def ai_chat(request: Request, user=Depends(require_user)):
+    body = await request.json()
+    user_message = body.get("message", "")
+    
+    uid = user["id"]
+    role = user["role"]
+    
+    # =================================================================
+    # 1. DEFINE AI TOOLS (The AI's "Hands" to fetch real-time data)
+    # The docstrings (""") are CRITICAL. Gemini reads them to know what the tool does.
+    # =================================================================
+    
+    def get_school_stats():
+        """Fetches the total number of students, teachers, courses, and enrollments in the LMS."""
+        if role != "admin": return "Access Denied."
+        return {
+            "total_students": query("SELECT COUNT(*) as c FROM users WHERE role='student'")[0]["c"],
+            "total_teachers": query("SELECT COUNT(*) as c FROM users WHERE role='teacher'")[0]["c"],
+            "total_courses": query("SELECT COUNT(*) as c FROM courses")[0]["c"]
+        }
+
+    def get_my_courses():
+        """Fetches the names and codes of the courses the user is currently involved in."""
+        if role == "student":
+            return query("SELECT c.name, c.code FROM courses c JOIN enrollments e ON e.course_id=c.id WHERE e.student_id=?", (uid,))
+        elif role == "teacher":
+            return query("SELECT name, code FROM courses WHERE teacher_id=?", (uid,))
+        return "Admins manage all courses. Use get_school_stats instead."
+
+    def get_student_grades():
+        """Fetches all graded assignments and quizzes for the current student."""
+        if role != "student": return "Only students have grades."
+        return query("""
+            SELECT a.title, s.grade, a.points 
+            FROM submissions s JOIN assignments a ON s.assignment_id=a.id 
+            WHERE s.student_id=? AND s.grade IS NOT NULL
+        """, (uid,))
+
+    # =================================================================
+    # 2. ASSIGN TOOLS SECURELY BASED ON ROLE
+    # =================================================================
+    my_tools = []
+    if role == "admin":
+        my_tools.append(get_school_stats)
+    elif role == "teacher":
+        my_tools.append(get_my_courses)
+    elif role == "student":
+        my_tools.extend([get_my_courses, get_student_grades])
+
+    # =================================================================
+    # 3. AI CONFIGURATION & CHAT
+    # =================================================================
+    system_prompt = f"""
+    You are the LankaLearn AI Assistant. Your name is 'LankaBot'.
+    User Context: {user['full_name']} (Role: {role}).
+
+    GUARDRAILS:
+    - You are a READ-ONLY assistant. You CANNOT change data.
+    - Be polite, concise, and helpful. 
+    - If you use a tool to get data, format it nicely for the user.
+    """
+
+    model = genai.GenerativeModel(
+        model_name="gemini-2.0-flash",
+        system_instruction=system_prompt,
+        tools=my_tools # <--- We pass the specific tools here!
+    )
+    
+    # We use start_chat with automatic function calling enabled.
+    # This allows Gemini to pause, run your Python function, and resume talking.
+    chat = model.start_chat(enable_automatic_function_calling=True)
+    
+    try:
+        response = chat.send_message(user_message)
+        return {"reply": response.text}
+    except Exception as e:
+        print(f"AI Error: {e}")
+        return {"reply": "I am currently receiving too many requests. Please try again in a few moments."}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
