@@ -61,7 +61,7 @@ else:
 # DB & General helpers
 # ---------------------------------------------------------------------------
 
-DATABASE_URL = "postgresql://lankalearn1_user:QIkCMALDh9p4gTIkLGtmCzAl3cebZ77Q@dpg-d7mit4hf9bms7381m55g-a.oregon-postgres.render.com/lankalearn1"
+DATABASE_URL = "postgresql://lankalearn1_user:QIkCMALDh9p4gTIkLGtmCzAl3cebZ77Q@dpg-d7mit4hf9bms7381m55g-a.oregon-postgres.render.com/lankalearn1?sslmode=require"
 
 try:
     DB_POOL = psycopg2.pool.SimpleConnectionPool(1, 20, DATABASE_URL)
@@ -505,16 +505,19 @@ def init_db():
             
             # --- THE FIX: Auto-sync all PostgreSQL sequences ---
             # --- THE FIX: Auto-sync all PostgreSQL sequences ---
+            # --- THE FIX: Auto-sync all PostgreSQL sequences Safely ---
             tables_with_sequences = [
                 'users', 'courses', 'modules', 'materials', 'pages', 'assignments', 
                 'discussions', 'announcements', 'quizzes', 'rubrics', 'rubric_criteria', 
                 'module_items', 'submissions', 'discussion_posts', 'syllabus', 'quiz_submissions',
-                'student_fee_structure', 'student_fee_payments', 'calendar_events' # <-- Added here
+                'student_fee_structure', 'student_fee_payments', 'calendar_events'
             ]
             for table in tables_with_sequences:
                 try:
-                    # Tells Postgres: "Look at the highest ID in this table, and set your counter to that number"
-                    cur.execute(f"SELECT setval('{table}_id_seq', (SELECT COALESCE(MAX(id), 0) FROM {table}))")
+                    cur.execute(f"SELECT MAX(id) FROM {table}")
+                    max_id = cur.fetchone()[0]
+                    if max_id is not None:
+                        cur.execute(f"SELECT setval('{table}_id_seq', %s)", (max_id,))
                 except:
                     pass
 
@@ -651,13 +654,21 @@ def seed(db):
         db.cursor().execute("INSERT INTO syllabus(id,course_id,content) VALUES(%s,%s,%s) ON CONFLICT (id) DO NOTHING", s)
 
     # Reset sequences to avoid ID conflicts when inserting new records
+    # Reset sequences safely
     tables_with_sequences = [
         'users', 'courses', 'modules', 'materials', 'pages', 'assignments', 
         'discussions', 'announcements', 'quizzes', 'rubrics', 'rubric_criteria', 
         'module_items', 'submissions', 'discussion_posts', 'syllabus'
     ]
-    for table in tables_with_sequences:
-        db.cursor().execute(f"SELECT setval('{table}_id_seq', (SELECT COALESCE(MAX(id), 0) FROM {table}))")
+    with db.cursor() as cur:
+        for table in tables_with_sequences:
+            try:
+                cur.execute(f"SELECT MAX(id) FROM {table}")
+                max_id = cur.fetchone()[0]
+                if max_id is not None:
+                    cur.execute(f"SELECT setval('{table}_id_seq', %s)", (max_id,))
+            except:
+                pass
 
     db.commit()
 
