@@ -1,6 +1,15 @@
 /* ============================================================
-   admin.js — Admin dashboard, users, courses, enrollments, fees
+   admin.js — Executive Dash, Audit Logs, Users, Courses, Fees
    ============================================================ */
+
+// ================================================================
+// EXECUTIVE DASHBOARD
+// ================================================================
+
+
+// ================================================================
+// MAIN ADMIN DASHBOARD
+// ================================================================
 
 async function loadAdminDashboard() {
   setPageTitle('Dashboard');
@@ -60,7 +69,7 @@ async function loadAdminDashboard() {
             <tr>
               <td><strong>${escHtml(u.full_name)}</strong></td>
               <td><code>${escHtml(u.username)}</code></td>
-              <td><span class="badge ${roleBadge(u.role)}">${u.role}</span></td>
+              <td><span class="badge ${roleBadge(u.role)}">${u.role.replace('_', ' ')}</span></td>
             </tr>`).join('')}
           </tbody></table>
         </div>
@@ -84,85 +93,8 @@ async function loadAdminDashboard() {
       </div>
     </div>
   `);
-
-  if (currentUser.role === 'admin' || currentUser.role === 'super_admin') {
-    const logsContainer = document.createElement('div');
-    logsContainer.innerHTML = `
-      <div class="card" style="margin-top:24px;">
-        <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; background:#fafafa;">
-          <span class="card-title">🛡️ System Audit Logs</span>
-          <div style="display:flex; gap:10px;">
-            <select id="logUserFilter" onchange="window.filterLogs()" class="form-control" style="padding:4px 8px; font-size:13px; min-width:140px;">
-              <option value="all">👥 All Staff</option>
-            </select>
-            <select id="logActionFilter" onchange="window.filterLogs()" class="form-control" style="padding:4px 8px; font-size:13px; min-width:140px;">
-              <option value="all">⚡ All Actions</option>
-            </select>
-          </div>
-        </div>
-        <div class="card-body" style="padding:0; max-height: 400px; overflow-y: auto;">
-          <table style="width:100%; font-size:13px; border-collapse: collapse;">
-            <thead style="position:sticky; top:0; background:#f8fafc; z-index:1; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
-              <tr><th style="padding:12px;">Date & Time</th><th style="padding:12px;">Staff Member</th><th style="padding:12px;">Action Performed</th><th style="padding:12px;">Specific Details</th></tr>
-            </thead>
-            <tbody id="auditLogsBody">
-              <tr><td colspan="4" style="text-align:center; padding:20px;">Loading logs...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `;
-    document.querySelector('.page-header').parentElement.appendChild(logsContainer);
-
-    api('/api/admin/logs').then(logs => {
-      window._allLogs = logs;
-      const tbody = document.getElementById('auditLogsBody');
-      const userFilter = document.getElementById('logUserFilter');
-      const actionFilter = document.getElementById('logActionFilter');
-
-      if (!logs || !logs.length) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-muted" style="text-align:center; padding:20px;">No actions logged yet.</td></tr>';
-        return;
-      }
-
-      const uniqueUsers = [...new Set(logs.map(l => l.full_name))];
-      const uniqueActions = [...new Set(logs.map(l => l.action))];
-
-      uniqueUsers.forEach(u => userFilter.innerHTML += `<option value="${escHtml(u)}">${escHtml(u)}</option>`);
-      uniqueActions.forEach(a => actionFilter.innerHTML += `<option value="${escHtml(a)}">${escHtml(a)}</option>`);
-
-      window.renderLogs = (filteredLogs) => {
-        if (!filteredLogs.length) {
-          tbody.innerHTML = '<tr><td colspan="4" class="text-muted" style="text-align:center; padding:20px;">No logs match your filter.</td></tr>';
-          return;
-        }
-        tbody.innerHTML = filteredLogs.map(l => `
-          <tr style="border-bottom: 1px solid #f1f5f9;">
-            <td style="white-space:nowrap; color:#64748b; padding:12px;">
-              <strong>${new Date(l.created_at).toLocaleDateString('en-US', {month:'short', day:'numeric'})}</strong><br>
-              <span style="font-size:11px;">${new Date(l.created_at).toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'})}</span>
-            </td>
-            <td style="padding:12px;">
-              <div style="font-weight:600; color:#0f172a;">${escHtml(l.full_name)}</div>
-              <span class="badge ${l.role === 'sub_admin' ? 'badge-blue' : 'badge-red'}" style="font-size:10px; padding:2px 6px;">${l.role.replace('_', ' ')}</span>
-            </td>
-            <td style="padding:12px;"><span style="font-weight:600; color:#1e40af; background:#eff6ff; padding:4px 8px; border-radius:6px; font-size:12px;">${escHtml(l.action)}</span></td>
-            <td style="color:#334155; line-height:1.4; padding:12px;">${escHtml(l.details)}</td>
-          </tr>
-        `).join('');
-      };
-
-      window.filterLogs = () => {
-        const u = userFilter.value;
-        const a = actionFilter.value;
-        const filtered = window._allLogs.filter(l => (u === 'all' || l.full_name === u) && (a === 'all' || l.action === a));
-        window.renderLogs(filtered);
-      };
-
-      window.renderLogs(logs);
-    });
-  }
 }
+
 
 async function loadExecutiveDashboard() {
     setPageTitle('Executive Dashboard');
@@ -303,7 +235,7 @@ async function loadExecutiveDashboard() {
             if (!students.length) html += `<tr><td colspan="3" class="text-center text-muted" style="padding:30px;">No students found.</td></tr>`;
             else {
                 students.forEach(s => {
-                    html += `<tr onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'"><td style="padding:14px 16px; border-bottom:1px solid #f1f5f9;"><strong>${escHtml(s.full_name)}</strong><br><span class="text-muted text-sm">${escHtml(s.username)}</span></td><td style="padding:14px 16px; border-bottom:1px solid #f1f5f9;">${s.admission_number ? `<code class="adm-number">${escHtml(s.admission_number)}</code>` : '—'}</td><td style="padding:14px 16px; border-bottom:1px solid #f1f5f9; text-align:center;"><div class="flex gap-8 flex-center"><button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${s.id})">👤 Profile</button><button class="btn btn-success btn-sm" onclick="window.openPaymentPortal(${s.id}, '${escHtml(s.full_name)}')">💰 Fees</button><button class="btn btn-secondary btn-sm" onclick="window.printTermReportCard(${s.id}, '${escHtml(s.full_name)}')">📄 Report</button></div></td></tr>`;
+                    html += `<tr onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'"><td style="padding:14px 16px; border-bottom:1px solid #f1f5f9;"><strong>${escHtml(s.full_name)}</strong><br><span class="text-muted text-sm">${escHtml(s.username)}</span></td><td style="padding:14px 16px; border-bottom:1px solid #f1f5f9;">${s.admission_number ? `<code class="adm-number">${escHtml(s.admission_number)}</code>` : '—'}</td><td style="padding:14px 16px; border-bottom:1px solid #f1f5f9; text-align:center;"><div class="flex gap-8 flex-center" style="justify-content:center;"><button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${s.id})">👤 Profile</button><button class="btn btn-success btn-sm" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="window.openPaymentPortal(${s.id}, '${escHtml(s.full_name)}')">💰 Fees</button><button class="btn btn-secondary btn-sm" onclick="window.printTermReportCard(${s.id}, '${escHtml(s.full_name)}')">📄 Report</button></div></td></tr>`;
                 });
             }
             html += `</tbody></table></div>`;
@@ -332,95 +264,119 @@ async function loadExecutiveDashboard() {
     };
 }
 
-    // Helper to render Teacher Details on click
-    window.execShowTeacher = (idx) => {
-        const t = window._execTeachers[idx];
-        const container = document.getElementById('execTeacherDetails');
-        
-        let html = `
-            <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px; border-bottom:2px solid var(--primary-light); padding-bottom:12px;">
-                <div class="user-avatar" style="width:48px;height:48px;font-size:20px;">${t.name.charAt(0)}</div>
-                <div>
-                    <h3 style="margin:0; color:var(--text); font-size:18px;">${escHtml(t.name)}</h3>
-                    <div class="text-sm text-muted">Academic Performance Overview</div>
-                </div>
-            </div>
-        `;
-        
-        html += `<table style="width:100%; font-size:13.5px; border-collapse:collapse;">
-            <thead><tr style="background:#f8fafc; border-bottom:2px solid var(--border);"><th style="padding:12px 10px;text-align:left;">Assigned Course</th><th style="padding:12px 10px;text-align:center;">Students Enrolled</th><th style="padding:12px 10px;text-align:center;">Avg. Grade</th></tr></thead>
-            <tbody>`;
-            
-        t.courses.forEach(c => {
-            const gradeBadge = c.avg !== null 
-                ? `<span class="badge ${c.avg >= 75 ? 'badge-green' : c.avg >= 50 ? 'badge-blue' : 'badge-red'}">${c.avg}%</span>` 
-                : '<span class="text-muted">No grades yet</span>';
-                
-            html += `<tr>
-                <td style="padding:14px 10px; border-bottom:1px solid #f1f5f9;"><strong>${escHtml(c.course)}</strong></td>
-                <td style="padding:14px 10px; border-bottom:1px solid #f1f5f9; text-align:center;">${c.students}</td>
-                <td style="padding:14px 10px; border-bottom:1px solid #f1f5f9; text-align:center;">${gradeBadge}</td>
-            </tr>`;
-        });
-        
-        html += `</tbody></table>`;
-        container.innerHTML = html;
-    };
+// ================================================================
+// SYSTEM AUDIT LOGS (DEDICATED MENU)
+// ================================================================
 
-    // Helper to render Student Drilldown on click
-    window.execShowGradeStudents = async (gradeName) => {
-        openModal(`Students in ${gradeName}`, '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
-        try {
-            // Fetch fresh users to ensure we have the latest list
-            const users = await api('/api/admin/users');
-            const students = users.filter(u => u.role === 'student' && (u.grade === gradeName || (gradeName === 'Unassigned' && !u.grade)));
-            
-            let html = `
-            <div class="table-wrapper">
-                <table style="width:100%; font-size:13.5px; border-collapse:collapse;">
-                    <thead>
-                        <tr style="background:#f8fafc; border-bottom:2px solid var(--border);">
-                            <th style="padding:12px 16px;text-align:left;">Student Name</th>
-                            <th style="padding:12px 16px;text-align:left;">Admission No.</th>
-                            <th style="padding:12px 16px;text-align:center;">Quick Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-            `;
-            
-            if (students.length === 0) {
-                html += `<tr><td colspan="3" class="text-center text-muted" style="padding:30px;">No students found in this grade.</td></tr>`;
-            } else {
-                students.forEach(s => {
-                    html += `
-                    <tr style="transition:background 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
-                        <td style="padding:14px 16px; border-bottom:1px solid #f1f5f9;">
-                            <strong>${escHtml(s.full_name)}</strong><br>
-                            <span class="text-muted text-sm">${escHtml(s.username)}</span>
-                        </td>
-                        <td style="padding:14px 16px; border-bottom:1px solid #f1f5f9;">
-                            ${s.admission_number ? `<code class="adm-number">${escHtml(s.admission_number)}</code>` : '<span class="text-muted">—</span>'}
-                        </td>
-                        <td style="padding:14px 16px; border-bottom:1px solid #f1f5f9; text-align:center;">
-                            <div class="flex gap-8 flex-center">
-                                <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${s.id})" title="Print Profile">👤 Profile</button>
-                                <button class="btn btn-success btn-sm" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="window.openPaymentPortal(${s.id}, '${escHtml(s.full_name)}')">💰 Fees</button>
-                                <button class="btn btn-secondary btn-sm" onclick="window.printTermReportCard(${s.id}, '${escHtml(s.full_name)}')">📄 Report Card</button>
-                            </div>
-                        </td>
-                    </tr>
-                    `;
-                });
-            }
-            
-            html += `</tbody></table></div>`;
-            document.getElementById('modalBody').innerHTML = html;
-            
-        } catch (e) {
-            document.getElementById('modalBody').innerHTML = `<div class="alert alert-error">Failed to load students: ${escHtml(e.message)}</div>`;
-        }
-    };
+async function loadAuditLogs() {
+  setPageTitle('System Audit Logs');
+  setActiveSidebar('logs');
+  setContent('<div class="loading-state"><div class="spinner"></div></div>');
 
+  const logs = await api('/api/admin/logs').catch(() => []);
+  window._allLogs = logs;
+
+  // Extract unique users and actions for the dropdowns
+  const uniqueUsers = [...new Set(logs.map(l => l.full_name))].filter(Boolean);
+  const uniqueActions = [...new Set(logs.map(l => l.action))].filter(Boolean);
+
+  setContent(`
+    <div class="page-header page-header-row">
+      <div>
+        <h1>🛡️ System Audit Logs</h1>
+        <p>Track all administrative and teaching actions across LankaLearn.</p>
+      </div>
+    </div>
+
+    <div class="card mb-24">
+      <div class="card-header" style="background:#fafafa; display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
+        <div class="tabs" style="margin:0; border:none; background:transparent; padding:0;">
+          <button class="tab-btn active" id="logTab-admin" onclick="switchLogTab('admin')">🔐 Admins & Staff</button>
+          <button class="tab-btn" id="logTab-teacher" onclick="switchLogTab('teacher')">👨‍🏫 Teachers</button>
+        </div>
+        <div style="flex:1"></div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <select id="logUserFilter" onchange="filterLogs()" class="form-control" style="min-width:150px; font-size:13px; padding:6px 10px;">
+            <option value="all">👥 All Users</option>
+            ${uniqueUsers.map(u => `<option value="${escHtml(u)}">${escHtml(u)}</option>`).join('')}
+          </select>
+          <select id="logActionFilter" onchange="filterLogs()" class="form-control" style="min-width:150px; font-size:13px; padding:6px 10px;">
+            <option value="all">⚡ All Actions</option>
+            ${uniqueActions.map(a => `<option value="${escHtml(a)}">${escHtml(a)}</option>`).join('')}
+          </select>
+          <input type="date" id="logDateFilter" onchange="filterLogs()" class="form-control" style="font-size:13px; padding:6px 10px;">
+          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('logDateFilter').value=''; filterLogs();">Clear Date</button>
+        </div>
+      </div>
+      
+      <div class="table-wrapper" style="max-height: 600px; overflow-y: auto;">
+        <table style="width:100%; font-size:13px; border-collapse: collapse;">
+          <thead style="position:sticky; top:0; background:#f8fafc; z-index:1; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+            <tr>
+              <th style="padding:12px; text-align:left;">Date & Time</th>
+              <th style="padding:12px; text-align:left;">User</th>
+              <th style="padding:12px; text-align:left;">Action</th>
+              <th style="padding:12px; text-align:left;">Specific Details</th>
+            </tr>
+          </thead>
+          <tbody id="auditLogsBody">
+            <tr><td colspan="4" style="text-align:center; padding:20px;">Loading logs...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `);
+
+  window._currentLogRole = 'admin'; // Default tab
+
+  window.switchLogTab = (roleType) => {
+    document.getElementById('logTab-admin').classList.remove('active');
+    document.getElementById('logTab-teacher').classList.remove('active');
+    document.getElementById(`logTab-${roleType}`).classList.add('active');
+    window._currentLogRole = roleType;
+    filterLogs();
+  };
+
+  window.filterLogs = () => {
+    const u = document.getElementById('logUserFilter').value;
+    const a = document.getElementById('logActionFilter').value;
+    const d = document.getElementById('logDateFilter').value; 
+
+    const filtered = window._allLogs.filter(l => {
+      const isTeacherLog = l.role === 'teacher';
+      if (window._currentLogRole === 'teacher' && !isTeacherLog) return false;
+      if (window._currentLogRole === 'admin' && isTeacherLog) return false;
+      const logDate = l.created_at ? l.created_at.split('T')[0].split(' ')[0] : '';
+      return (u === 'all' || l.full_name === u) && (a === 'all' || l.action === a) && (!d || logDate === d);
+    });
+
+    const tbody = document.getElementById('auditLogsBody');
+    if (!filtered.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-muted" style="text-align:center; padding:30px;">No logs match your filters.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(l => `
+      <tr style="border-bottom: 1px solid #f1f5f9; transition: background 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+        <td style="white-space:nowrap; color:#64748b; padding:12px;">
+          <strong>${new Date(l.created_at).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'})}</strong><br>
+          <span style="font-size:11px;">${new Date(l.created_at).toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'})}</span>
+        </td>
+        <td style="padding:12px;">
+          <div style="font-weight:600; color:#0f172a;">${escHtml(l.full_name || 'System')}</div>
+          <span class="badge ${l.role === 'teacher' ? 'badge-purple' : 'badge-red'}" style="font-size:10px; padding:2px 6px;">${(l.role || 'system').replace('_', ' ')}</span>
+        </td>
+        <td style="padding:12px;">
+          <span style="font-weight:600; color:#1e40af; background:#eff6ff; padding:4px 8px; border-radius:6px; font-size:12px; border:1px solid #bfdbfe;">
+            ${escHtml(l.action)}
+          </span>
+        </td>
+        <td style="color:#334155; line-height:1.4; padding:12px;">${escHtml(l.details)}</td>
+      </tr>
+    `).join('');
+  };
+  filterLogs();
+}
 
 // ================================================================
 // USERS SECTION
@@ -446,25 +402,67 @@ async function loadAdminUsers(activeTab) {
   function teacherTable(list) {
     if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
     return `<table><thead><tr><th>Profile</th><th>Details</th><th>Actions</th></tr></thead><tbody>
-      ${list.map(u => `<tr><td><strong>${escHtml(u.full_name)}</strong></td><td><code>${escHtml(u.username)}</code></td><td><button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'teacher')">Edit</button></td></tr>`).join('')}
+      ${list.map(u => {
+        const isYou = u.id === currentUser.id;
+        return `<tr>
+          <td><strong>${escHtml(u.full_name)}</strong><br><code>${escHtml(u.username)}</code></td>
+          <td>${escHtml(u.phone || '—')}</td>
+          <td>
+            <div class="flex gap-8 flex-center">
+              ${isYou ? '<span class="text-muted">You</span>' : `
+                <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'teacher')">Edit</button>
+                <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${u.id})" title="Print Profile">🖨️ Profile</button>
+                <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')">Reset PW</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
+              `}
+            </div>
+          </td>
+        </tr>`}).join('')}
     </tbody></table>`;
   }
 
   function studentTable(list) {
     if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
-    return `<table><thead><tr><th>Profile</th><th>Details</th><th>Grade</th><th>Actions</th></tr></thead><tbody>
-      ${list.map(u => `<tr><td><strong>${escHtml(u.full_name)}</strong></td><td><code>${escHtml(u.username)}</code></td><td><span class="grade-pill">${escHtml(u.grade || '—')}</span></td><td><button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'student')">Edit</button></td></tr>`).join('')}
+    return `<table><thead><tr><th>Profile</th><th>Grade</th><th>Actions</th></tr></thead><tbody>
+      ${list.map(u => `<tr>
+        <td><strong>${escHtml(u.full_name)}</strong><br><code>${escHtml(u.username)}</code></td>
+        <td><span class="grade-pill">${escHtml(u.grade || '—')}</span></td>
+        <td>
+          <div class="flex gap-8 flex-center">
+            <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'student')">Edit</button>
+            <button class="btn btn-success btn-sm" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="window.openPaymentPortal(${u.id},'${escHtml(u.full_name)}')">💰 Fees</button>
+            <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${u.id})" title="Print Profile">🖨️ Profile</button>
+            <button class="btn btn-secondary btn-sm" onclick="window.printTermReportCard(${u.id}, '${escHtml(u.full_name)}')">📄 Report</button>
+            <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')">Reset PW</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
+          </div>
+        </td>
+      </tr>`).join('')}
     </tbody></table>`;
   }
 
   function adminTable(list, roleLabel) {
     if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
     return `<table><thead><tr><th>Name</th><th>Role</th><th>Actions</th></tr></thead><tbody>
-      ${list.map(u => `<tr><td><strong>${escHtml(u.full_name)}</strong></td><td>${u.role}</td><td><button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'${roleLabel}')">Edit</button></td></tr>`).join('')}
+      ${list.map(u => {
+        const isYou = u.id === currentUser.id;
+        return `<tr>
+          <td><strong>${escHtml(u.full_name)}</strong><br><code>${escHtml(u.username)}</code></td>
+          <td><span class="badge badge-purple">${u.role.replace('_', ' ')}</span></td>
+          <td>
+            <div class="flex gap-8 flex-center">
+              ${isYou ? '<span class="text-muted">You</span>' : `
+                <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'${roleLabel}')">Edit</button>
+                <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${u.id})" title="Print Profile">🖨️ Profile</button>
+                <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')">Reset PW</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
+              `}
+            </div>
+          </td>
+        </tr>`}).join('')}
     </tbody></table>`;
   }
 
-  // Render main layout
   setContent(`
     <div class="page-header page-header-row">
       <div><h1>👥 Users</h1><p>Manage all accounts in the system</p></div>
@@ -519,7 +517,6 @@ async function loadAdminUsers(activeTab) {
     </div>
   `);
 
-  // Grouping logic for the Classes tab
   const classGroups = {};
   students.forEach(s => {
     const g = s.grade || 'Unassigned';
@@ -535,7 +532,7 @@ async function loadAdminUsers(activeTab) {
       <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; padding: 10px;">
         ${sortedGrades.map(grade => `
           <div class="card" style="cursor:pointer; border:1.5px solid var(--border); transition: all 0.2s;" 
-               onclick="execShowGradeStudents('${escHtml(grade)}')"
+               onclick="window.execShowGradeStudents('${escHtml(grade)}')"
                onmouseover="this.style.transform='translateY(-3px)'; this.style.borderColor='var(--primary)';"
                onmouseout="this.style.transform='none'; this.style.borderColor='var(--border)';">
             <div style="padding:20px; text-align:center;">
@@ -556,10 +553,8 @@ async function loadAdminUsers(activeTab) {
   const btnToActivate = document.getElementById('tbtn-' + tabToShow);
   if (btnToActivate) switchTab(btnToActivate, tabToShow);
 }
-function roleToTab(role) {
-  return { teacher: 'tab-teachers', student: 'tab-students', sub_admin: 'tab-subadmins', admin: 'tab-admins', super_admin: 'tab-admins' }[role] || 'tab-teachers';
-}
 
+function roleToTab(role) { return { teacher: 'tab-teachers', student: 'tab-students', sub_admin: 'tab-subadmins', admin: 'tab-admins', super_admin: 'tab-admins' }[role] || 'tab-teachers'; }
 function switchTab(btn, tabId) {
   btn.closest('.tabs').parentElement.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
@@ -567,118 +562,50 @@ function switchTab(btn, tabId) {
   document.getElementById(tabId).style.display = 'block';
 }
 
-function toggleSelectAll(role, checked) {
-  document.querySelectorAll(`.${role}-check`).forEach(cb => {
-    const row = cb.closest('tr');
-    if (row && row.style.display !== 'none') {
-      cb.checked = checked;
-    }
-  });
-  onRowCheck(role);
+function filterTeachersSearch() {
+  const q = (document.querySelector('#tab-teachers .search-box')?.value || '').toLowerCase();
+  document.querySelectorAll('#tab-teachers tbody tr').forEach(row => { row.style.display = (!q || row.textContent.toLowerCase().includes(q)) ? '' : 'none'; });
 }
 
-function onRowCheck(role) {
-  const checked = document.querySelectorAll(`.${role}-check:checked`);
-  const bar = document.getElementById(`${role}BulkBar`);
-  const count = document.getElementById(`${role}SelCount`);
-  if (bar) bar.style.display = checked.length ? 'flex' : 'none';
-  if (count) count.textContent = checked.length;
-  const all = document.querySelectorAll(`.${role}-check`);
-  const visible = [...all].filter(cb => cb.closest('tr').style.display !== 'none');
-  const selectAll = document.getElementById(`${role}SelectAll`);
-  if (selectAll) selectAll.checked = visible.length > 0 && checked.length === visible.length;
-}
-
-function clearSelection(role) {
-  document.querySelectorAll(`.${role}-check`).forEach(cb => cb.checked = false);
-  const selectAll = document.getElementById(`${role}SelectAll`);
-  if (selectAll) selectAll.checked = false;
-  onRowCheck(role);
-}
-
-async function bulkDelete(role) {
-  const checked = [...document.querySelectorAll(`.${role}-check:checked`)];
-  if (!checked.length) return;
-  const ids = checked.map(cb => cb.dataset.uid);
-  const names = ids.map(id => {
-    const u = window._adminUsers.find(u => String(u.id) === String(id));
-    return u ? u.full_name : id;
-  });
-  if (!confirm(`Delete ${ids.length} ${role}(s)?\n\n${names.join(', ')}\n\nThis cannot be undone.`)) return;
-
-  let failed = 0;
-  for (const id of ids) {
-    try {
-      await apiDelete(`/api/admin/users/${id}`);
-    } catch { failed++; }
-  }
-
-  if (failed) showToast(`${ids.length - failed} deleted, ${failed} failed.`, 'error');
-  else showToast(`${ids.length} ${role}(s) deleted.`, 'success');
-  loadAdminUsers(roleToTab(role));
-}
-
-function filterStudentsByGrade() {
-  filterStudentsSearch();
+function filterStudentsSearch() {
+  const q = (document.querySelector('#tab-students .search-box')?.value || '').toLowerCase();
+  document.querySelectorAll('#tab-students tbody tr').forEach(row => { row.style.display = (!q || row.textContent.toLowerCase().includes(q)) ? '' : 'none'; });
 }
 
 const GRADE_OPTIONS = [
   { value: '', label: '— Select Grade —' },
-  { value: 'Grade 6', label: 'Grade 6' },
-  { value: 'Grade 7', label: 'Grade 7' },
-  { value: 'Grade 8', label: 'Grade 8' },
-  { value: 'Grade 9', label: 'Grade 9' },
-  { value: 'Grade 10', label: 'Grade 10' },
-  { value: 'Grade 11 (O/L)', label: 'Grade 11 (O/L)' },
-  { value: 'Grade 12 (A/L)', label: 'Grade 12 (A/L)' },
-  { value: 'Grade 13 (A/L)', label: 'Grade 13 (A/L)' },
+  { value: 'Grade 6', label: 'Grade 6' }, { value: 'Grade 7', label: 'Grade 7' }, { value: 'Grade 8', label: 'Grade 8' },
+  { value: 'Grade 9', label: 'Grade 9' }, { value: 'Grade 10', label: 'Grade 10' }, { value: 'Grade 11 (O/L)', label: 'Grade 11 (O/L)' },
+  { value: 'Grade 12 (A/L)', label: 'Grade 12 (A/L)' }, { value: 'Grade 13 (A/L)', label: 'Grade 13 (A/L)' },
 ];
 
 function showCreateUser(role) {
   const roleTitle = role.charAt(0).toUpperCase() + role.slice(1);
-  const gradeField = role === 'student'
-    ? [{ label: 'Grade', name: 'grade', type: 'select', options: GRADE_OPTIONS }]
-    : [];
-  const admissionField = role === 'student'
-    ? [{ label: 'Admission Number', name: 'admission_number', placeholder: 'e.g. LL-2026-0001' }]
-    : [];
-
+  const gradeField = role === 'student' ? [{ label: 'Grade', name: 'grade', type: 'select', options: GRADE_OPTIONS }] : [];
+  const admissionField = role === 'student' ? [{ label: 'Admission Number', name: 'admission_number', placeholder: 'e.g. LL-2026-0001' }] : [];
   openModal(`Create New ${roleTitle}`, modalForm([
     { name: 'role', type: 'hidden', value: role },
     { label: 'Full Name', name: 'full_name', placeholder: 'e.g. Kasun Perera', required: true },
     { label: 'Username', name: 'username', placeholder: 'e.g. kasun.p', required: true },
     { label: 'Password', name: 'password', type: 'password', placeholder: '••••••••', required: true },
-    { label: 'Phone Number', name: 'phone', type: 'tel', placeholder: 'e.g. 077 123 4567' },
+    { label: 'Phone Number', name: 'phone', type: 'tel' },
     { label: 'Date of Birth', name: 'dob', type: 'date' },
-    { label: 'Address', name: 'address', type: 'textarea', placeholder: 'Street address...' },
-    ...gradeField,
-    ...admissionField,
-    { label: 'Additional Notes', name: 'notes', type: 'textarea', placeholder: 'Any extra information...' },
+    { label: 'Address', name: 'address', type: 'textarea' },
+    ...gradeField, ...admissionField,
+    { label: 'Additional Notes', name: 'notes', type: 'textarea' },
     { label: 'Profile Image', name: 'file', type: 'file' }
   ], async (fd) => {
-    try {
-      await apiPost('/api/admin/users', fd);
-      closeModal(); showToast(`${roleTitle} created successfully`, 'success'); loadAdminUsers(roleToTab(role));
+    try { await apiPost('/api/admin/users', fd); closeModal(); showToast(`${roleTitle} created successfully`, 'success'); loadAdminUsers(roleToTab(role));
     } catch (e) { showToast(e.message, 'error'); }
   }, `Create ${roleTitle}`));
-
-  if (role === 'student') {
-    api('/api/admin/next-admission').then(res => {
-      const field = document.querySelector('[name="admission_number"]');
-      if (field && !field.value) field.value = res.admission_number;
-    }).catch(() => {});
-  }
+  if (role === 'student') { api('/api/admin/next-admission').then(res => { const field = document.querySelector('[name="admission_number"]'); if (field && !field.value) field.value = res.admission_number; }).catch(() => {}); }
 }
 
 function showEditUser(id, roleLabel) {
   const u = window._adminUsers.find(x => x.id === id);
   const roleTitle = roleLabel.charAt(0).toUpperCase() + roleLabel.slice(1);
-  const gradeField = roleLabel === 'student'
-    ? [{ label: 'Grade', name: 'grade', type: 'select', value: u.grade || '', options: GRADE_OPTIONS }]
-    : [];
-  const admissionField = roleLabel === 'student'
-    ? [{ label: 'Admission Number', name: 'admission_number', value: u.admission_number || '' }]
-    : [];
+  const gradeField = roleLabel === 'student' ? [{ label: 'Grade', name: 'grade', type: 'select', value: u.grade || '', options: GRADE_OPTIONS }] : [];
+  const admissionField = roleLabel === 'student' ? [{ label: 'Admission Number', name: 'admission_number', value: u.admission_number || '' }] : [];
   openModal(`Edit ${roleTitle}: ${u.full_name}`, modalForm([
     { label: 'Full Name', name: 'full_name', value: u.full_name, required: true },
     { label: 'Username', name: 'username', value: u.username, required: true },
@@ -687,13 +614,10 @@ function showEditUser(id, roleLabel) {
     { label: 'Date of Birth', name: 'dob', type: 'date', value: u.dob || '' },
     { label: 'Address', name: 'address', type: 'textarea', value: u.address || '' },
     { label: 'Additional Notes', name: 'notes', type: 'textarea', value: u.notes || '' },
-    ...gradeField,
-    ...admissionField,
+    ...gradeField, ...admissionField,
     { label: 'Update Profile Image', name: 'file', type: 'file' }
   ], async (fd) => {
-    try {
-      await api(`/api/admin/users/${id}`, { method: 'PUT', body: fd });
-      closeModal(); showToast('User updated!', 'success'); loadAdminUsers(roleToTab(roleLabel));
+    try { await api(`/api/admin/users/${id}`, { method: 'PUT', body: fd }); closeModal(); showToast('User updated!', 'success'); loadAdminUsers(roleToTab(roleLabel));
     } catch (e) { showToast(e.message, 'error'); }
   }, 'Save Changes'));
 }
@@ -701,12 +625,7 @@ function showEditUser(id, roleLabel) {
 async function deleteUser(id, name) {
   if (!confirm(`Delete user "${name}"? This cannot be undone.`)) return;
   const cur = document.querySelector('.tab-panel[style*="display: block"], .tab-panel.active:not([style*="display: none"])');
-  const activeTab = cur ? cur.id : 'tab-teachers';
-  try {
-    await apiDelete(`/api/admin/users/${id}`);
-    showToast('User deleted', 'success');
-    loadAdminUsers(activeTab);
-  } catch (e) { showToast(e.message, 'error'); }
+  try { await apiDelete(`/api/admin/users/${id}`); showToast('User deleted', 'success'); loadAdminUsers(cur ? cur.id : 'tab-teachers'); } catch (e) { showToast(e.message, 'error'); }
 }
 
 // ================================================================
@@ -718,20 +637,11 @@ async function loadAdminCourses() {
   setActiveSidebar('courses');
   setContent('<div class="loading-state"><div class="spinner"></div></div>');
 
-  const [courses, teachers] = await Promise.all([
-    api('/api/admin/courses'),
-    api('/api/admin/teachers')
-  ]);
-
-  window._adminCourses = courses;
-  window._adminTeachers = teachers;
+  const [courses, teachers] = await Promise.all([api('/api/admin/courses'), api('/api/admin/teachers')]);
+  window._adminCourses = courses; window._adminTeachers = teachers;
 
   setContent(`
-    <div class="page-header page-header-row">
-      <div><h1>📚 Courses</h1><p>Create and manage all courses</p></div>
-      <button class="btn btn-primary" onclick="showCreateCourse()">+ Create Course</button>
-    </div>
-
+    <div class="page-header page-header-row"><div><h1>📚 Courses</h1><p>Create and manage all courses</p></div><button class="btn btn-primary" onclick="showCreateCourse()">+ Create Course</button></div>
     <div class="course-grid">
       ${courses.map((c, i) => `
         <div class="course-card">
@@ -751,7 +661,6 @@ async function loadAdminCourses() {
           </div>
         </div>
       `).join('')}
-      ${!courses.length ? `<div class="empty-state"><div class="empty-icon">📚</div><p>No courses yet. Create your first one!</p></div>` : ''}
     </div>
   `);
 }
@@ -765,14 +674,9 @@ function showEditCourse(id) {
     { label: 'Description', name: 'description', type: 'textarea', value: c.description || '' },
     { label: 'Start Date', name: 'start_date', type: 'date', value: c.start_date || '', required: true },
     { label: 'End Date', name: 'end_date', type: 'date', value: c.end_date || '', required: true },
-    { label: 'Teacher', name: 'teacher_id', type: 'select', value: c.teacher_id, required: true,
-      options: teachers.map(t => ({ value: t.id, label: t.full_name })) },
+    { label: 'Teacher', name: 'teacher_id', type: 'select', value: c.teacher_id, required: true, options: teachers.map(t => ({ value: t.id, label: t.full_name })) },
   ], async (fd) => {
-    try {
-      await api(`/api/admin/courses/${id}`, { method: 'PUT', body: fd });
-      closeModal();
-      showToast('Course updated!', 'success');
-      loadAdminCourses();
+    try { await api(`/api/admin/courses/${id}`, { method: 'PUT', body: fd }); closeModal(); showToast('Course updated!', 'success'); loadAdminCourses();
     } catch (e) { showToast(e.message, 'error'); }
   }, 'Save Changes'));
 }
@@ -782,117 +686,45 @@ function showCreateCourse() {
   openModal('Create New Course', modalForm([
     { label: 'Course Code', name: 'code', placeholder: 'e.g. OL-MATH-11', required: true },
     { label: 'Course Name', name: 'name', placeholder: 'e.g. O/L Mathematics', required: true },
-    { label: 'Description', name: 'description', type: 'textarea', placeholder: 'Brief description…' },
+    { label: 'Description', name: 'description', type: 'textarea' },
     { label: 'Start Date', name: 'start_date', type: 'date', required: true },
     { label: 'End Date', name: 'end_date', type: 'date', required: true },
-    { label: 'Teacher', name: 'teacher_id', type: 'select', required: true,
-      options: teachers.map(t => ({ value: t.id, label: t.full_name })) },
+    { label: 'Teacher', name: 'teacher_id', type: 'select', required: true, options: teachers.map(t => ({ value: t.id, label: t.full_name })) },
   ], async (fd) => {
-    try {
-      await apiPost('/api/admin/courses', fd);
-      closeModal();
-      showToast('Course created!', 'success');
-      loadAdminCourses();
+    try { await apiPost('/api/admin/courses', fd); closeModal(); showToast('Course created!', 'success'); loadAdminCourses();
     } catch (e) { showToast(e.message, 'error'); }
   }, 'Create Course'));
 }
 
 async function deleteCourse(id, name) {
   if (!confirm(`Delete course "${name}"? This cannot be undone.`)) return;
-  try {
-    await apiDelete(`/api/admin/courses/${id}`);
-    showToast('Course deleted', 'success');
-    loadAdminCourses();
-  } catch (e) { showToast(e.message, 'error'); }
+  try { await apiDelete(`/api/admin/courses/${id}`); showToast('Course deleted', 'success'); loadAdminCourses(); } catch (e) { showToast(e.message, 'error'); }
 }
 
 async function manageEnrollments(courseId, courseName) {
   const data = await api(`/api/admin/courses/${courseId}/students`);
-
   let html = `
     <div style="display:flex; gap:20px; align-items:flex-start;">
       <div style="flex:1; border:1px solid var(--border); border-radius:8px; padding:16px; background:#fafafa;">
-        <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
-          <h4 style="margin:0">Currently Enrolled (${data.enrolled.length})</h4>
-          <button class="btn btn-danger btn-xs" onclick="bulkUnenroll(${courseId})">Remove Selected</button>
-        </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:12px;"><h4 style="margin:0">Enrolled (${data.enrolled.length})</h4><button class="btn btn-danger btn-xs" onclick="bulkUnenroll(${courseId})">Remove Selected</button></div>
         <div style="max-height:300px; overflow-y:auto; border:1px solid #e2e8f0; background:white;">
-          <table style="width:100%; font-size:13px;">
-            <thead style="position:sticky; top:0; background:#f8fafc; z-index:1;"><tr><th style="padding:8px"><input type="checkbox" onchange="document.querySelectorAll('.unenroll-chk').forEach(c => c.checked = this.checked)"></th><th style="padding:8px">Student</th></tr></thead>
-            <tbody>
-              ${data.enrolled.map(s => `<tr><td style="padding:8px; border-bottom:1px solid #eee;"><input type="checkbox" class="unenroll-chk" value="${s.id}"></td><td style="padding:8px; border-bottom:1px solid #eee;">${escHtml(s.full_name)} <span class="text-muted">(${s.username})</span></td></tr>`).join('')}
-            </tbody>
-          </table>
+          <table style="width:100%; font-size:13px;"><thead style="position:sticky; top:0; background:#f8fafc; z-index:1;"><tr><th style="padding:8px"><input type="checkbox" onchange="document.querySelectorAll('.unenroll-chk').forEach(c => c.checked = this.checked)"></th><th style="padding:8px">Student</th></tr></thead>
+          <tbody>${data.enrolled.map(s => `<tr><td style="padding:8px; border-bottom:1px solid #eee;"><input type="checkbox" class="unenroll-chk" value="${s.id}"></td><td style="padding:8px; border-bottom:1px solid #eee;">${escHtml(s.full_name)} <span class="text-muted">(${s.username})</span></td></tr>`).join('')}</tbody></table>
         </div>
       </div>
-
       <div style="flex:1; border:1px solid var(--border); border-radius:8px; padding:16px; background:#fafafa;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <h4 style="margin:0">Add Students</h4>
-          <button class="btn btn-primary btn-xs" onclick="bulkEnroll(${courseId})">+ Enroll Selected</button>
-        </div>
-        <input type="text" id="addStudentSearch" class="form-control mb-8" style="padding:6px; font-size:12px;" placeholder="Search name or grade..." oninput="filterAddStudents()">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;"><h4 style="margin:0">Add Students</h4><button class="btn btn-primary btn-xs" onclick="bulkEnroll(${courseId})">+ Enroll Selected</button></div>
+        <input type="text" id="addStudentSearch" class="form-control mb-8" style="padding:6px; font-size:12px;" placeholder="Search name..." oninput="filterAddStudents()">
         <div style="max-height:265px; overflow-y:auto; border:1px solid #e2e8f0; background:white;">
-          <table style="width:100%; font-size:13px;" id="addStudentsTable">
-            <thead style="position:sticky; top:0; background:#f8fafc; z-index:1;"><tr><th style="padding:8px"><input type="checkbox" onchange="document.querySelectorAll('.enroll-chk:not([style*=\\'display: none\\'])').forEach(c => c.checked = this.checked)"></th><th style="padding:8px">Available Students</th></tr></thead>
-            <tbody>
-              ${data.available.map(s => `<tr><td style="padding:8px; border-bottom:1px solid #eee;"><input type="checkbox" class="enroll-chk" value="${s.id}"></td><td style="padding:8px; border-bottom:1px solid #eee;" class="stu-name">${escHtml(s.full_name)} <span class="text-muted">(${s.username})</span></td></tr>`).join('')}
-            </tbody>
-          </table>
+          <table style="width:100%; font-size:13px;" id="addStudentsTable"><thead style="position:sticky; top:0; background:#f8fafc; z-index:1;"><tr><th style="padding:8px"><input type="checkbox" onchange="document.querySelectorAll('.enroll-chk:not([style*=\\'display: none\\'])').forEach(c => c.checked = this.checked)"></th><th style="padding:8px">Available</th></tr></thead>
+          <tbody>${data.available.map(s => `<tr><td style="padding:8px; border-bottom:1px solid #eee;"><input type="checkbox" class="enroll-chk" value="${s.id}"></td><td style="padding:8px; border-bottom:1px solid #eee;" class="stu-name">${escHtml(s.full_name)}</td></tr>`).join('')}</tbody></table>
         </div>
       </div>
-    </div>
-  `;
-
-  window.filterAddStudents = () => {
-    const q = document.getElementById('addStudentSearch').value.toLowerCase();
-    document.querySelectorAll('#addStudentsTable tbody tr').forEach(row => {
-      row.style.display = row.querySelector('.stu-name').textContent.toLowerCase().includes(q) ? '' : 'none';
-      if(row.style.display === 'none') row.querySelector('.enroll-chk').checked = false;
-    });
-  };
-
-  window.bulkEnroll = async (cid) => {
-    const ids = Array.from(document.querySelectorAll('.enroll-chk:checked')).map(c => parseInt(c.value));
-    if(!ids.length) return;
-    await apiJSON(`/api/admin/courses/${cid}/enroll/bulk`, { student_ids: ids });
-    manageEnrollments(cid, courseName);
-  };
-
-  window.bulkUnenroll = async (cid) => {
-    const ids = Array.from(document.querySelectorAll('.unenroll-chk:checked')).map(c => parseInt(c.value));
-    if(!ids.length) return;
-    await apiJSON(`/api/admin/courses/${cid}/unenroll/bulk`, { student_ids: ids });
-    manageEnrollments(cid, courseName);
-  };
-
+    </div>`;
+  window.filterAddStudents = () => { const q = document.getElementById('addStudentSearch').value.toLowerCase(); document.querySelectorAll('#addStudentsTable tbody tr').forEach(row => { row.style.display = row.querySelector('.stu-name').textContent.toLowerCase().includes(q) ? '' : 'none'; if(row.style.display === 'none') row.querySelector('.enroll-chk').checked = false; }); };
+  window.bulkEnroll = async (cid) => { const ids = Array.from(document.querySelectorAll('.enroll-chk:checked')).map(c => parseInt(c.value)); if(!ids.length) return; await apiJSON(`/api/admin/courses/${cid}/enroll/bulk`, { student_ids: ids }); manageEnrollments(cid, courseName); };
+  window.bulkUnenroll = async (cid) => { const ids = Array.from(document.querySelectorAll('.unenroll-chk:checked')).map(c => parseInt(c.value)); if(!ids.length) return; await apiJSON(`/api/admin/courses/${cid}/unenroll/bulk`, { student_ids: ids }); manageEnrollments(cid, courseName); };
   openModal(`Students — ${courseName}`, html, 'modal-box-lg');
-}
-
-// ================================================================
-// SEARCH HELPERS
-// ================================================================
-
-function filterTeachersSearch() {
-  const q = (document.getElementById('teacherSearchBox')?.value || '').toLowerCase();
-  document.querySelectorAll('#teacherTableBody tr').forEach(row => {
-    const text = row.textContent.toLowerCase();
-    row.style.display = (!q || text.includes(q)) ? '' : 'none';
-  });
-  onRowCheck('teacher');
-}
-
-function filterStudentsSearch() {
-  const q = (document.getElementById('studentSearchBox')?.value || '').toLowerCase();
-  const grade = document.getElementById('gradeFilter')?.value || 'All';
-  document.querySelectorAll('#studentTableBody tr').forEach(row => {
-    const text = row.textContent.toLowerCase();
-    const rowGrade = row.dataset.grade || 'Unassigned';
-    const matchesSearch = !q || text.includes(q);
-    const matchesGrade  = grade === 'All' || rowGrade === grade;
-    row.style.display = (matchesSearch && matchesGrade) ? '' : 'none';
-  });
-  onRowCheck('student');
 }
 
 // ================================================================
@@ -932,7 +764,7 @@ async function loadAdminFees() {
         <table style="width:100%; font-size:13px; margin-bottom:16px;">
           <thead><tr>
             <th style="text-align:left; padding-bottom:8px;">Grade</th>
-            <th style="text-align:right; padding-bottom:8px;">Monthly Fee (LKR)</th>
+            <th style="text-align:right; padding-bottom:8px;">Monthly Tuition (LKR)</th>
             <th style="text-align:right; padding-bottom:8px;">Action</th>
           </tr></thead>
           <tbody>
@@ -1030,13 +862,13 @@ window.deleteMasterFee = async (gradeName) => {
     } catch (e) { showToast(e.message, "error"); }
 };
 
-
 window.openPaymentPortal = async (sid, name) => {
     openModal(`Payment Portal — ${name}`, '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
     const data = await api(`/api/admin/students/${sid}/fees`);
     const currentMonth = new Date().toISOString().slice(0, 7);
     const today = new Date().toISOString().split('T')[0];
     
+    // Auto-fill amount based on master fee
     const autoAmount = data.master_fee > 0 ? data.master_fee : '';
     
     let html = `
@@ -1051,7 +883,7 @@ window.openPaymentPortal = async (sid, name) => {
         <div class="form-group">
           <label>Payment Type</label>
           <select id="payType" class="form-control" onchange="togglePayFields(${data.master_fee})">
-            <option value="monthly">Monthly Fee</option>
+            <option value="monthly">Monthly Tuition</option>
             <option value="extra">Other / Extra Fee</option>
           </select>
         </div>
@@ -1098,6 +930,7 @@ window.openPaymentPortal = async (sid, name) => {
     document.getElementById('modalBody').innerHTML = html;
 };
 
+// UI Toggle Logic
 window.togglePayFields = (masterFee) => {
     const type = document.getElementById('payType').value;
     if (type === 'monthly') {
@@ -1127,7 +960,7 @@ window.processDirectPayment = async (sid) => {
         const monthVal = document.getElementById('payMonth').value;
         if (!monthVal) return showToast('Please select a month', 'error');
         fd.append('fee_month', monthVal);
-        fd.append('payment_for', 'Monthly Fee');
+        fd.append('payment_for', 'Monthly Tuition');
     } else {
         const descVal = document.getElementById('payDesc').value;
         if (!descVal) return showToast('Please enter a description', 'error');
@@ -1377,4 +1210,200 @@ window.clearActiveBroadcast = async () => {
   } catch (e) {
     showToast(e.message, 'error');
   }
+};
+
+
+// ================================================================
+// GLOBAL HELPERS
+// ================================================================
+
+// ================================================================
+// GLOBAL HELPERS
+// ================================================================
+
+window.execShowGradeStudents = async (gradeName) => {
+    openModal(`Students in ${gradeName}`, '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
+    try {
+        const users = await api('/api/admin/users');
+        const students = users.filter(u => u.role === 'student' && (u.grade === gradeName || (gradeName === 'Unassigned' && !u.grade)));
+        
+        // Add the new Top Bar with Search and Print All buttons
+        let html = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding:10px; background:#f8fafc; border-radius:8px; border:1px solid var(--border);">
+            <div style="display:flex; align-items:center; gap:8px; flex:1;">
+                <span style="font-size:16px;">🔍</span>
+                <input type="text" id="classStudentSearch" class="form-control" placeholder="Search name or admission number..." style="max-width:300px; margin:0;" oninput="filterClassStudents()">
+            </div>
+            <button class="btn btn-primary" onclick="window.printClassReportCards('${escHtml(gradeName)}')">🖨️ Print All Reports</button>
+        </div>
+        
+        <div class="table-wrapper">
+            <table id="classStudentsTable" style="width:100%; font-size:13.5px; border-collapse:collapse;">
+                <thead>
+                    <tr style="background:#f8fafc; border-bottom:2px solid var(--border);">
+                        <th style="padding:12px 16px;text-align:left;">Name</th>
+                        <th style="padding:12px 16px;text-align:left;">Adm No.</th>
+                        <th style="padding:12px 16px;text-align:center;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+        
+        if (!students.length) {
+            html += `<tr><td colspan="3" class="text-center text-muted" style="padding:30px;">No students found.</td></tr>`;
+        } else {
+            students.forEach(s => {
+                html += `<tr class="class-student-row" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                    <td style="padding:14px 16px; border-bottom:1px solid #f1f5f9;">
+                        <strong class="cs-name">${escHtml(s.full_name)}</strong><br>
+                        <span class="text-muted text-sm cs-username">${escHtml(s.username)}</span>
+                    </td>
+                    <td style="padding:14px 16px; border-bottom:1px solid #f1f5f9;" class="cs-adm">
+                        ${s.admission_number ? `<code class="adm-number">${escHtml(s.admission_number)}</code>` : '—'}
+                    </td>
+                    <td style="padding:14px 16px; border-bottom:1px solid #f1f5f9; text-align:center;">
+                        <div class="flex gap-8 flex-center" style="justify-content:center;">
+                            <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${s.id})">👤 Profile</button>
+                            <button class="btn btn-success btn-sm" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="window.openPaymentPortal(${s.id}, '${escHtml(s.full_name)}')">💰 Fees</button>
+                            <button class="btn btn-secondary btn-sm" onclick="window.printTermReportCard(${s.id}, '${escHtml(s.full_name)}')">📄 Report</button>
+                        </div>
+                    </td>
+                </tr>`;
+            });
+        }
+        
+        html += `</tbody></table></div>`;
+        document.getElementById('modalBody').innerHTML = html;
+
+        // Make the search logic available globally to filter rows
+        window.filterClassStudents = () => {
+            const q = document.getElementById('classStudentSearch').value.toLowerCase();
+            document.querySelectorAll('.class-student-row').forEach(row => {
+                const name = row.querySelector('.cs-name')?.textContent.toLowerCase() || '';
+                const adm = row.querySelector('.cs-adm')?.textContent.toLowerCase() || '';
+                if (name.includes(q) || adm.includes(q)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        };
+
+    } catch (e) { document.getElementById('modalBody').innerHTML = `<div class="alert alert-error">Error: ${e.message}</div>`; }
+};
+
+window.printClassReportCards = async (gradeName) => {
+    // Visual feedback so the user knows the system is working
+    const btn = document.querySelector('#modalBody .btn-primary');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:6px"></div> Generating...';
+    btn.disabled = true;
+
+    try {
+        // Fetch all students for this grade
+        const users = await api('/api/admin/users');
+        const students = users.filter(u => u.role === 'student' && (u.grade === gradeName || (gradeName === 'Unassigned' && !u.grade)));
+        
+        if (!students.length) {
+            showToast('No students available to print.', 'error');
+            btn.innerHTML = originalText; btn.disabled = false;
+            return;
+        }
+
+        // Fetch all their report cards concurrently for speed
+        const reportPromises = students.map(s => api(`/api/admin/students/${s.id}/report-card`).then(res => ({ student: s, data: res })).catch(() => ({ student: s, error: true })));
+        const reports = await Promise.all(reportPromises);
+
+        const today = new Date().toLocaleDateString('en-LK', { year:'numeric', month:'long', day:'numeric' });
+        
+        let combinedHtml = `<!DOCTYPE html><html><head>
+            <title>Class Reports — ${escHtml(gradeName)}</title>
+            <style>
+                body { font-family: 'Times New Roman', serif; padding: 0; color: #000; margin: 0; background: #525659; }
+                /* Create physical page breaks between each student's report */
+                .report-page { padding: 40px; max-width: 800px; margin: 20px auto; background: white; box-shadow: 0 0 10px rgba(0,0,0,0.5); page-break-after: always; }
+                .report-page:last-child { page-break-after: auto; }
+                .school-header { text-align: center; border-bottom: 4px double #800000; padding-bottom: 20px; margin-bottom: 30px; }
+                .school-header h1 { color: #800000; font-size: 32px; margin: 0; text-transform: uppercase; letter-spacing: 2px;}
+                .school-header h3 { color: #555; margin: 5px 0 0 0; font-weight: normal; }
+                .student-details { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 30px; border: 1px solid #000; padding: 15px; }
+                table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+                th, td { border: 1px solid #000; padding: 10px; text-align: center; }
+                th { background-color: #f0f0f0; text-transform: uppercase; font-size: 12px; }
+                td.subject-name { text-align: left; font-weight: bold; }
+                .signatures { display: flex; justify-content: space-between; margin-top: 60px; }
+                .sig-line { border-top: 1px solid #000; width: 200px; text-align: center; padding-top: 5px; font-size: 14px; }
+                
+                @media print {
+                    body { background: white; }
+                    .report-page { margin: 0; box-shadow: none; border: none; }
+                }
+            </style>
+        </head><body>`;
+
+        reports.forEach(r => {
+            if (r.error) {
+                combinedHtml += `<div class="report-page"><h2 style="color:red; text-align:center;">Failed to generate report for ${escHtml(r.student.full_name)}</h2></div>`;
+                return;
+            }
+            
+            let rowsHtml = '';
+            if (r.data.results.length === 0) {
+                rowsHtml = '<tr><td colspan="3" style="padding:20px; color:#666;">Student is not currently enrolled in any courses.</td></tr>';
+            } else {
+                rowsHtml = r.data.results.map(res => `
+                    <tr>
+                        <td class="subject-name">${escHtml(res.course_name)}</td>
+                        <td>${res.percentage !== null ? `<strong>${res.percentage}%</strong>` : '<span style="color:#999">—</span>'}</td>
+                        <td>${res.remarks}</td>
+                    </tr>
+                `).join('');
+            }
+
+            combinedHtml += `
+            <div class="report-page">
+                <div class="school-header">
+                    <h1>Wesswood International College</h1>
+                    <h3>Official End-of-Term Academic Report</h3>
+                    <p>Term 1 - ${new Date().getFullYear()}</p>
+                </div>
+                <div class="student-details">
+                    <div><strong>Student Name:</strong> ${escHtml(r.data.student.full_name)}</div>
+                    <div><strong>Admission No:</strong> ${escHtml(r.data.student.admission_number || 'N/A')}</div>
+                    <div><strong>Grade:</strong> ${escHtml(r.data.student.grade || 'N/A')}</div>
+                    <div><strong>Date Issued:</strong> ${today}</div>
+                </div>
+                <table>
+                    <thead><tr><th style="width: 50%;">Subject</th><th>Term Grade</th><th>Remarks</th></tr></thead>
+                    <tbody>
+                        ${rowsHtml}
+                    </tbody>
+                </table>
+                <div class="signatures">
+                    <div class="sig-line">Class Teacher</div>
+                    <div class="sig-line">Principal</div>
+                </div>
+            </div>`;
+        });
+
+        combinedHtml += `
+            <script>
+                // Ensure fonts load completely before prompting print
+                setTimeout(() => { window.print(); }, 600);
+            </script>
+        </body></html>`;
+
+        const win = window.open('', '_blank');
+        win.document.open();
+        win.document.write(combinedHtml);
+        win.document.close();
+
+        // Restore button state
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+
+    } catch (e) {
+        showToast(e.message, 'error');
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
 };

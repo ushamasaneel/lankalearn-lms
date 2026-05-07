@@ -759,10 +759,15 @@ def change_password(new_password: str = Form(...), user=Depends(require_user)):
 
 @app.post("/api/admin/users/{uid}/reset-password")
 def admin_reset_pw(uid: int, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
-    temp_pw = str(uuid.uuid4())[:8] # Generates an 8-character temp password
+    temp_pw = str(uuid.uuid4())[:8]
     execute("UPDATE users SET password_hash=?, must_change_password=TRUE WHERE id=?", 
             (hash_pw(temp_pw), uid))
-    log_audit(user["id"], "Reset Password", f"User ID: {uid}")
+    
+    # Fetch the name for the log
+    target = query("SELECT username, full_name FROM users WHERE id=?", (uid,), one=True)
+    target_name = target["full_name"] if target else f"ID {uid}"
+    
+    log_audit(user["id"], "Reset Password", f"User: {target_name} ({target['username']})")
     return {"temp_password": temp_pw}
 
 # ---------------------------------------------------------------------------
@@ -1044,12 +1049,11 @@ def add_fee_payment_hybrid(
         VALUES(?,?,?,?,?,?,?,?,?)
     """, (sid, amount, payment_type, payment_for, fee_month, paid_date, receipt_number, notes, user["id"]))
     
-    log_audit(user["id"], "Recorded Fee Payment", f"Student ID: {sid} | Amount: {amount} | Type: {payment_type}")
-    return {"ok": True}
-
-@app.delete("/api/admin/fee-payments/{pid}")
-def delete_fee_payment(pid: int, user=Depends(require_role("admin", "super_admin", "sub_admin"))):
-    execute("DELETE FROM student_fee_payments WHERE id=?", (pid,))
+    # Fetch student name for the log
+    student = query("SELECT full_name FROM users WHERE id=?", (sid,), one=True)
+    student_name = student["full_name"] if student else f"ID {sid}"
+    
+    log_audit(user["id"], "Recorded Fee Payment", f"Student: {student_name} | Amount: {amount} | Type: {payment_type}")
     return {"ok": True}
 
 @app.post("/api/admin/users")
@@ -1236,13 +1240,17 @@ def update_course(cid: int, code: str = Form(...), name: str = Form(...),
     try:
         execute("UPDATE courses SET code=?, name=?, description=?, teacher_id=?, start_date=?, end_date=? WHERE id=?",
                 (code, name, description, teacher_id, start_date, end_date, cid))
-        log_audit(user["id"], "Updated Course", f"Course ID: {cid} | New Name: {name}")
+        log_audit(user["id"], "Updated Course", f"Course: {name}") # Now uses name!
         return {"ok": True}
     except IntegrityError:
         raise HTTPException(400, "Course code already exists")
 
 @app.delete("/api/admin/courses/{cid}")
 def delete_course(cid: int, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
+    # Fetch the name BEFORE deleting it
+    course = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)
+    course_name = course["name"] if course else f"ID {cid}"
+    
     # We must manually clear all dependent data first to satisfy Database Foreign Key constraints
     db = get_db()
     try:
@@ -1290,7 +1298,7 @@ def delete_course(cid: int, user=Depends(require_role("admin", "sub_admin", "sup
     finally:
         DB_POOL.putconn(db)
 
-    log_audit(user["id"], "Deleted Course", f"Course ID: {cid}")    
+    log_audit(user["id"], "Deleted Course", f"Course: {course_name}")    
         
     return {"ok": True}
 
@@ -1311,6 +1319,9 @@ def enroll_student(cid: int, student_id: int = Form(...),
                    user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     try:
         execute("INSERT INTO enrollments(student_id,course_id) VALUES(?,?)", (student_id, cid))
+        course = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)
+        student = query("SELECT full_name FROM users WHERE id=?", (student_id,), one=True)
+        log_audit(user["id"], "Enrolled Student", f"Student: {student['full_name']} | Course: {course['name']}")
         return {"ok": True}
     except IntegrityError:
         raise HTTPException(400, "Already enrolled")
@@ -1318,6 +1329,9 @@ def enroll_student(cid: int, student_id: int = Form(...),
 @app.delete("/api/admin/courses/{cid}/enroll/{sid}")
 def unenroll_student(cid: int, sid: int, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     execute("DELETE FROM enrollments WHERE course_id=? AND student_id=?", (cid, sid))
+    course = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)
+    student = query("SELECT full_name FROM users WHERE id=?", (sid,), one=True)
+    log_audit(user["id"], "Unenrolled Student", f"Student: {student['full_name']} | Course: {course['name']}")
     return {"ok": True}
 
 @app.get("/api/admin/teachers")
@@ -1553,6 +1567,7 @@ def get_syllabus(cid: int, user=Depends(require_user)):
     return query("SELECT * FROM syllabus WHERE course_id=?", (cid,), one=True) or {"content": ""}
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Teacher create/edit endpoints
 # ---------------------------------------------------------------------------
 
@@ -1560,14 +1575,12 @@ def get_syllabus(cid: int, user=Depends(require_user)):
 def create_module(cid: int, title: str = Form(...), description: str = Form(""),
                   user=Depends(require_role("teacher"))):
     check_course_access(cid, user)
-    
-    # Find the current highest position so the new module goes at the bottom
     pos = (query("SELECT MAX(position) as m FROM modules WHERE course_id=?", (cid,), one=True) or {}).get("m") or 0
-    
-    # Insert without any file_name reference
     mid = execute("INSERT INTO modules(course_id,title,description,position) VALUES(?,?,?,?)",
                   (cid, title, description, pos+1))
     
+    course_name = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)["name"]
+    log_audit(user["id"], "Created Module", f"Course: {course_name} | Title: {title}")
     return {"id": mid}
 
 @app.put("/api/courses/{cid}/modules/{mid}")
@@ -1576,49 +1589,44 @@ async def update_module(cid: int, mid: int, title: str = Form(...), description:
                   user=Depends(require_role("teacher"))):
     check_course_access(cid, user)
     saved_filename = None
-    
     try:
-        # Get existing module to preserve old file if no new one uploaded
         existing = query("SELECT file_name FROM modules WHERE id=? AND course_id=?", (mid, cid), one=True)
         existing_file = existing["file_name"] if existing else None
         
         if file and file.filename:
             course_dir = TEACHER_UPLOAD_DIR / f"course_{cid}"
             course_dir.mkdir(exist_ok=True)
-            
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             clean_name = "".join(x for x in file.filename if x.isalnum() or x in "._- ")
             saved_filename = f"module_{cid}_{timestamp}_{clean_name}"
             file_path = course_dir / saved_filename
-            
             with file_path.open("wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
-            
-            # Delete old file if exists
             if existing_file:
-                try:
-                    (TEACHER_UPLOAD_DIR / f"course_{cid}" / existing_file).unlink()
-                except:
-                    pass
+                try: (TEACHER_UPLOAD_DIR / f"course_{cid}" / existing_file).unlink()
+                except: pass
         
         final_file = saved_filename if saved_filename else existing_file
         execute("UPDATE modules SET title=?,description=?,file_name=? WHERE id=? AND course_id=?",
                 (title, description, final_file, mid, cid))
+        
+        course_name = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)["name"]
+        log_audit(user["id"], "Updated Module", f"Course: {course_name} | Module: {title}")
         return {"ok": True}
     except Exception as e:
         if saved_filename:
-            try:
-                (TEACHER_UPLOAD_DIR / f"course_{cid}" / saved_filename).unlink()
-            except:
-                pass
+            try: (TEACHER_UPLOAD_DIR / f"course_{cid}" / saved_filename).unlink()
+            except: pass
         raise HTTPException(500, f"Failed to update module: {str(e)}")
 
 @app.delete("/api/courses/{cid}/modules/{mid}")
 def delete_module(cid: int, mid: int, user=Depends(require_role("teacher"))):
     check_course_access(cid, user)
-    # Delete items inside the module first to prevent foreign key errors
     execute("DELETE FROM module_items WHERE module_id=?", (mid,))
     execute("DELETE FROM modules WHERE id=? AND course_id=?", (mid, cid))
+    
+    course_name = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)["name"]
+    log_audit(user["id"], "Deleted Module", f"Course: {course_name} | Module ID: {mid}")
     return {"ok": True}
 
 @app.post("/api/courses/{cid}/modules/{mid}/items")
@@ -1646,23 +1654,19 @@ async def create_material(cid: int, title: str = Form(...), content: str = Form(
         if file and file.filename:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             clean_name = "".join(x for x in file.filename if x.isalnum() or x in "._- ")
-            
-            # CRITICAL FIX: No slashes here! Saves directly as mat_courseID_time_name
             saved_filename = f"mat_{cid}_{timestamp}_{clean_name}"
-            
-            # Saves to the root UPLOAD_DIR
             file_path = UPLOAD_DIR / saved_filename
-            
-            # Securely writes the file
             content_bytes = await file.read()
             with file_path.open("wb") as buffer:
                 buffer.write(content_bytes)
-                
         elif file_name:
             saved_filename = file_name.strip()
 
         mid = execute("INSERT INTO materials(course_id,title,content,file_name) VALUES(?,?,?,?)",
                       (cid, title, content, saved_filename))
+        
+        course_name = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)["name"]
+        log_audit(user["id"], "Added Material", f"Course: {course_name} | Title: {title}")
         return {"id": mid}
     except Exception as e:
         if saved_filename:
@@ -1676,31 +1680,26 @@ async def create_page(cid: int, title: str = Form(...), body: str = Form(""),
                 user=Depends(require_role("teacher"))):
     check_course_access(cid, user)
     saved_filename = ""
-    
     try:
         if file and file.filename:
-            # Create organized directory structure for teacher uploads
             course_dir = TEACHER_UPLOAD_DIR / f"course_{cid}"
             course_dir.mkdir(exist_ok=True)
-            
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             clean_name = "".join(x for x in file.filename if x.isalnum() or x in "._- ")
             saved_filename = f"pages/course_{cid}/page_{cid}_{timestamp}_{clean_name}"
             file_path = course_dir / f"page_{cid}_{timestamp}_{clean_name}"
-            
-            # Use shutil to avoid reading entire file into memory
             with file_path.open("wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
         
         pid = execute("INSERT INTO pages(course_id,title,body,file_name) VALUES(?,?,?,?)", (cid, title, body, saved_filename))
+        
+        course_name = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)["name"]
+        log_audit(user["id"], "Created Page", f"Course: {course_name} | Title: {title}")
         return {"id": pid}
     except Exception as e:
-        # Clean up file if it was created but DB insert failed
         if saved_filename:
-            try:
-                (TEACHER_UPLOAD_DIR / f"course_{cid}" / saved_filename.split("/")[-1]).unlink()
-            except:
-                pass
+            try: (TEACHER_UPLOAD_DIR / f"course_{cid}" / saved_filename.split("/")[-1]).unlink()
+            except: pass
         raise HTTPException(500, f"Failed to create page: {str(e)}")
 
 @app.get("/api/courses/{cid}/pages/{pid}")
@@ -1716,32 +1715,27 @@ async def create_assignment(cid: int, title: str = Form(...), description: str =
                           user=Depends(require_role("teacher"))):
     check_course_access(cid, user)
     saved_filename = ""
-    
     try:
         if file and file.filename:
-            # Create organized directory structure for teacher uploads
             course_dir = TEACHER_UPLOAD_DIR / f"course_{cid}"
             course_dir.mkdir(exist_ok=True)
-            
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             clean_name = "".join(x for x in file.filename if x.isalnum() or x in "._- ")
             saved_filename = f"assignments/course_{cid}/assignment_{cid}_{timestamp}_{clean_name}"
             file_path = course_dir / f"assignment_{cid}_{timestamp}_{clean_name}"
-            
-            # Use shutil to avoid reading entire file into memory
             with file_path.open("wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
         
         aid = execute("INSERT INTO assignments(course_id,title,description,due_date,points,rubric_id,file_name) VALUES(?,?,?,?,?,?,?)",
                       (cid, title, description, due_date, points, rubric_id, saved_filename))
+        
+        course_name = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)["name"]
+        log_audit(user["id"], "Created Assignment", f"Course: {course_name} | Title: {title}")
         return {"id": aid}
     except Exception as e:
-        # Clean up file if it was created but DB insert failed
         if saved_filename:
-            try:
-                (TEACHER_UPLOAD_DIR / f"course_{cid}" / saved_filename.split("/")[-1]).unlink()
-            except:
-                pass
+            try: (TEACHER_UPLOAD_DIR / f"course_{cid}" / saved_filename.split("/")[-1]).unlink()
+            except: pass
         raise HTTPException(500, f"Failed to create assignment: {str(e)}")
 
 @app.post("/api/courses/{cid}/discussions")
@@ -1751,32 +1745,27 @@ async def create_discussion(cid: int, title: str = Form(...), prompt: str = Form
                       user=Depends(require_role("teacher"))):
     check_course_access(cid, user)
     saved_filename = ""
-    
     try:
         if file and file.filename:
-            # Create organized directory structure for teacher uploads
             course_dir = TEACHER_UPLOAD_DIR / f"course_{cid}"
             course_dir.mkdir(exist_ok=True)
-            
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             clean_name = "".join(x for x in file.filename if x.isalnum() or x in "._- ")
             saved_filename = f"discussions/course_{cid}/discussion_{cid}_{timestamp}_{clean_name}"
             file_path = course_dir / f"discussion_{cid}_{timestamp}_{clean_name}"
-            
-            # Use shutil to avoid reading entire file into memory
             with file_path.open("wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
         
         did = execute("INSERT INTO discussions(course_id,title,prompt,due_date,graded,file_name) VALUES(?,?,?,?,?,?)",
                       (cid, title, prompt, due_date, graded, saved_filename))
+        
+        course_name = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)["name"]
+        log_audit(user["id"], "Created Discussion", f"Course: {course_name} | Title: {title}")
         return {"id": did}
     except Exception as e:
-        # Clean up file if it was created but DB insert failed
         if saved_filename:
-            try:
-                (TEACHER_UPLOAD_DIR / f"course_{cid}" / saved_filename.split("/")[-1]).unlink()
-            except:
-                pass
+            try: (TEACHER_UPLOAD_DIR / f"course_{cid}" / saved_filename.split("/")[-1]).unlink()
+            except: pass
         raise HTTPException(500, f"Failed to create discussion: {str(e)}")
 
 @app.post("/api/courses/{cid}/announcements")
@@ -1785,32 +1774,27 @@ async def create_announcement(cid: int, title: str = Form(...), body: str = Form
                         user=Depends(require_role("teacher"))):
     check_course_access(cid, user)
     saved_filename = ""
-    
     try:
         if file and file.filename:
-            # Create organized directory structure for teacher uploads
             course_dir = TEACHER_UPLOAD_DIR / f"course_{cid}"
             course_dir.mkdir(exist_ok=True)
-            
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             clean_name = "".join(x for x in file.filename if x.isalnum() or x in "._- ")
             saved_filename = f"announcements/course_{cid}/announcement_{cid}_{timestamp}_{clean_name}"
             file_path = course_dir / f"announcement_{cid}_{timestamp}_{clean_name}"
-            
-            # Use shutil to avoid reading entire file into memory
             with file_path.open("wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
         
         aid = execute("INSERT INTO announcements(course_id,title,body,author_id,file_name) VALUES(?,?,?,?,?)",
                       (cid, title, body, user["id"], saved_filename))
+        
+        course_name = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)["name"]
+        log_audit(user["id"], "Posted Announcement", f"Course: {course_name} | Title: {title}")
         return {"id": aid}
     except Exception as e:
-        # Clean up file if it was created but DB insert failed
         if saved_filename:
-            try:
-                (TEACHER_UPLOAD_DIR / f"course_{cid}" / saved_filename.split("/")[-1]).unlink()
-            except:
-                pass
+            try: (TEACHER_UPLOAD_DIR / f"course_{cid}" / saved_filename.split("/")[-1]).unlink()
+            except: pass
         raise HTTPException(500, f"Failed to create announcement: {str(e)}")
 
 @app.post("/api/courses/{cid}/quizzes")
@@ -1819,7 +1803,6 @@ async def create_quiz(cid: int, title: str = Form(...), description: str = Form(
                 user=Depends(require_role("teacher"))):
     check_course_access(cid, user)
     saved_filename = ""
-    
     try:
         if file and file.filename:
             course_dir = TEACHER_UPLOAD_DIR / f"course_{cid}"
@@ -1831,14 +1814,15 @@ async def create_quiz(cid: int, title: str = Form(...), description: str = Form(
             with file_path.open("wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
         
-        # Note the added time_limit here!
         qid = execute("INSERT INTO quizzes(course_id,title,description,due_date,time_limit,file_name) VALUES(?,?,?,?,?,?)",
                       (cid, title, description, due_date, time_limit, saved_filename))
+        
+        course_name = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)["name"]
+        log_audit(user["id"], "Created Quiz", f"Course: {course_name} | Title: {title}")
         return {"id": qid}
     except Exception as e:
         if saved_filename:
-            try:
-                (TEACHER_UPLOAD_DIR / f"course_{cid}" / saved_filename.split("/")[-1]).unlink()
+            try: (TEACHER_UPLOAD_DIR / f"course_{cid}" / saved_filename.split("/")[-1]).unlink()
             except: pass
         raise HTTPException(500, f"Failed to create quiz: {str(e)}")
 
@@ -1852,8 +1836,6 @@ async def update_syllabus(cid: int, content: str = Form(""), file: UploadFile = 
             clean_name = "".join(x for x in file.filename if x.isalnum() or x in "._- ")
             saved_filename = f"syl_{cid}_{timestamp}_{clean_name}"
             file_path = UPLOAD_DIR / saved_filename
-            
-            # FIX: Await file.read() ensures the file completely saves to disk
             content_bytes = await file.read()
             with file_path.open("wb") as buffer:
                 buffer.write(content_bytes)
@@ -1868,9 +1850,13 @@ async def update_syllabus(cid: int, content: str = Form(""), file: UploadFile = 
                         (content, now_str(), cid))
         else:
             execute("INSERT INTO syllabus(course_id,content,file_name) VALUES(?,?,?)", (cid, content, saved_filename))
+        
+        course_name = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)["name"]
+        log_audit(user["id"], "Updated Syllabus", f"Course: {course_name}")
         return {"ok": True}
     except Exception as e:
         raise HTTPException(500, f"Failed to update syllabus: {str(e)}")
+
 # ---------------------------------------------------------------------------
 # Rubrics
 # ---------------------------------------------------------------------------
@@ -1894,8 +1880,10 @@ def create_rubric(request: Request, cid: int, user=Depends(require_role("teacher
     for c in criteria:
         execute("INSERT INTO rubric_criteria(rubric_id,description,points) VALUES(?,?,?)",
                 (rid, c["description"], c["points"]))
+    
+    course_name = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)["name"]
+    log_audit(user["id"], "Created Rubric", f"Course: {course_name} | Title: {title}")
     return {"id": rid}
-
 # ---------------------------------------------------------------------------
 # Submissions
 # ---------------------------------------------------------------------------
@@ -1933,25 +1921,33 @@ def submit_assignment(cid: int, aid: int, text_response: str = Form(""),
 def grade_submission(cid: int, aid: int, sid: int,
                      grade: float = Form(...), feedback: str = Form(""),
                      user=Depends(require_role("teacher"))):
-    check_course_access(cid, user)
+    course = check_course_access(cid, user)
+    student = query("SELECT full_name FROM users WHERE id=?", (sid,), one=True)
+    assign = query("SELECT title FROM assignments WHERE id=?", (aid,), one=True)
+    
     execute("UPDATE submissions SET grade=?,feedback=?,graded_at=? WHERE id=? AND assignment_id=?",
             (grade, feedback, now_str(), sid, aid))
+    
+    log_audit(user["id"], "Graded Assignment", f"Course: {course['name']} | Assignment: {assign['title']} | Student: {student['full_name']} | Grade: {grade}")
     return {"ok": True}
 
 @app.post("/api/courses/{cid}/assignments/{aid}/submissions/{sid}/regrade")
 def regrade_submission(cid: int, aid: int, sid: int,
                       grade: float = Form(...), feedback: str = Form(""),
                       user=Depends(require_role("teacher"))):
-    """Regrade a submission - allows changing the grade after it was initially graded"""
-    check_course_access(cid, user)
+    course = check_course_access(cid, user)
     sub = query("SELECT * FROM submissions WHERE id=? AND assignment_id=?", (sid, aid), one=True)
     if not sub:
         raise HTTPException(404, "Submission not found")
+        
+    student = query("SELECT full_name FROM users WHERE id=?", (sid,), one=True)
+    assign = query("SELECT title FROM assignments WHERE id=?", (aid,), one=True)
     
-    # Update with new grade and add note that it was regraded
     feedback_with_note = f"[REGRADED] {feedback}\n\nPrevious grade: {sub['grade']}\nPrevious feedback: {sub['feedback']}"
     execute("UPDATE submissions SET grade=?,feedback=?,graded_at=? WHERE id=?",
             (grade, feedback_with_note, now_str(), sid))
+            
+    log_audit(user["id"], "Regraded Assignment", f"Course: {course['name']} | Assignment: {assign['title']} | Student: {student['full_name']} | New Grade: {grade}")
     return {"ok": True, "message": "Submission regraded successfully"}
 
 # ---------------------------------------------------------------------------
@@ -2200,7 +2196,7 @@ def get_attendance(cid: int, date: str, user=Depends(require_role("teacher"))):
 
 @app.post("/api/courses/{cid}/attendance")
 async def save_attendance(cid: int, request: Request, user=Depends(require_role("teacher"))):
-    check_course_access(cid, user)
+    course = check_course_access(cid, user)
     data = await request.json()
     date = data['date']
     for student_id, status in data['records'].items():
@@ -2208,8 +2204,9 @@ async def save_attendance(cid: int, request: Request, user=Depends(require_role(
             INSERT INTO attendance(course_id, student_id, date, status) VALUES(?,?,?,?)
             ON CONFLICT(course_id, student_id, date) DO UPDATE SET status=EXCLUDED.status
         """, (cid, student_id, date, status))
+        
+    log_audit(user["id"], "Saved Attendance", f"Course: {course['name']} | Date: {date} | Records: {len(data['records'])}")
     return {"ok": True}
-
 
 @app.get("/fix-db")
 def fix_database():
@@ -2526,18 +2523,20 @@ def get_executive_dashboard(user=Depends(require_role("admin", "super_admin", "s
 @app.post("/api/admin/courses/{cid}/enroll/bulk")
 async def bulk_enroll(cid: int, request: Request, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     data = await request.json()
+    course = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)
     for sid in data.get("student_ids", []):
         try: execute("INSERT INTO enrollments(student_id,course_id) VALUES(?,?)", (sid, cid))
         except IntegrityError: pass
-        log_audit(user["id"], "Bulk Enrolled Students", f"Course ID: {cid} | Total Enrolled: {len(data.get('student_ids', []))}")
+    log_audit(user["id"], "Bulk Enrolled Students", f"Course: {course['name']} | Total Enrolled: {len(data.get('student_ids', []))}")
     return {"ok": True}
 
 @app.post("/api/admin/courses/{cid}/unenroll/bulk")
 async def bulk_unenroll(cid: int, request: Request, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     data = await request.json()
+    course = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)
     for sid in data.get("student_ids", []):
         execute("DELETE FROM enrollments WHERE course_id=? AND student_id=?", (cid, sid))
-        log_audit(user["id"], "Bulk Unenrolled Students", f"Course ID: {cid} | Total Removed: {len(data.get('student_ids', []))}")
+    log_audit(user["id"], "Bulk Unenrolled Students", f"Course: {course['name']} | Total Removed: {len(data.get('student_ids', []))}")
     return {"ok": True}
 
 @app.get("/api/student/fees")

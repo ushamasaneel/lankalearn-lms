@@ -134,12 +134,14 @@ function buildSidebar() {
       <div class="sidebar-item" id="si-cal" onclick="loadCalendar(); setActiveSidebar('cal')">
         <span class="si-icon">📅</span> Calendar
       </div>
-      <div class="sidebar-item" id="si-help" onclick="loadFAQ(); setActiveSidebar('help')">
-        <span class="si-icon">❓</span> Help & Support
+      <div class="sidebar-item" id="si-logs" onclick="loadAuditLogs(); setActiveSidebar('logs')">
+        <span class="si-icon">🛡️</span> Audit Logs
       </div>
-
       <div class="sidebar-item" id="si-exec" onclick="loadExecutiveDashboard(); setActiveSidebar('exec')">
          <span class="si-icon">📈</span> Executive Dash
+      </div>
+      <div class="sidebar-item" id="si-help" onclick="loadFAQ(); setActiveSidebar('help')">
+        <span class="si-icon">❓</span> Help & Support
       </div>
     `;
   } else if (currentUser.role === 'teacher') {
