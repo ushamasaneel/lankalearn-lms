@@ -225,22 +225,7 @@ async function loadExecutiveDashboard() {
         container.innerHTML = html;
     };
 
-    window.execShowGradeStudents = async (gradeName) => {
-        openModal(`Students in ${gradeName}`, '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
-        try {
-            const users = await api('/api/admin/users');
-            const students = users.filter(u => u.role === 'student' && (u.grade === gradeName || (gradeName === 'Unassigned' && !u.grade)));
-            let html = `<div class="table-wrapper"><table style="width:100%; font-size:13.5px; border-collapse:collapse;"><thead><tr style="background:#f8fafc; border-bottom:2px solid var(--border);"><th style="padding:12px 16px;text-align:left;">Name</th><th style="padding:12px 16px;text-align:left;">Adm No.</th><th style="padding:12px 16px;text-align:center;">Actions</th></tr></thead><tbody>`;
-            if (!students.length) html += `<tr><td colspan="3" class="text-center text-muted" style="padding:30px;">No students found.</td></tr>`;
-            else {
-                students.forEach(s => {
-                    html += `<tr onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'"><td style="padding:14px 16px; border-bottom:1px solid #f1f5f9;"><strong>${escHtml(s.full_name)}</strong><br><span class="text-muted text-sm">${escHtml(s.username)}</span></td><td style="padding:14px 16px; border-bottom:1px solid #f1f5f9;">${s.admission_number ? `<code class="adm-number">${escHtml(s.admission_number)}</code>` : '—'}</td><td style="padding:14px 16px; border-bottom:1px solid #f1f5f9; text-align:center;"><div class="flex gap-8 flex-center" style="justify-content:center;"><button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${s.id})">👤 Profile</button><button class="btn btn-success btn-sm" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="window.openPaymentPortal(${s.id}, '${escHtml(s.full_name)}')">💰 Fees</button><button class="btn btn-secondary btn-sm" onclick="window.printTermReportCard(${s.id}, '${escHtml(s.full_name)}')">📄 Report</button></div></td></tr>`;
-                });
-            }
-            html += `</tbody></table></div>`;
-            document.getElementById('modalBody').innerHTML = html;
-        } catch (e) { document.getElementById('modalBody').innerHTML = `<div class="alert alert-error">Error: ${e.message}</div>`; }
-    };
+    
 
     window.execShowFinancialDrilldown = async (gradeName) => {
         const currentMonth = new Date().toISOString().slice(0, 7);
@@ -275,9 +260,9 @@ async function loadAuditLogs() {
   const logs = await api('/api/admin/logs').catch(() => []);
   window._allLogs = logs;
 
-  // Extract unique users and actions for the dropdowns
-  const uniqueUsers = [...new Set(logs.map(l => l.full_name))].filter(Boolean);
-  const uniqueActions = [...new Set(logs.map(l => l.action))].filter(Boolean);
+  // Extract unique users and actions for the dropdowns (Sorted alphabetically!)
+  const uniqueUsers = [...new Set(logs.map(l => l.full_name))].filter(Boolean).sort();
+  const uniqueActions = [...new Set(logs.map(l => l.action))].filter(Boolean).sort();
 
   setContent(`
     <div class="page-header page-header-row">
@@ -288,23 +273,45 @@ async function loadAuditLogs() {
     </div>
 
     <div class="card mb-24">
-      <div class="card-header" style="background:#fafafa; display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
-        <div class="tabs" style="margin:0; border:none; background:transparent; padding:0;">
-          <button class="tab-btn active" id="logTab-admin" onclick="switchLogTab('admin')">🔐 Admins & Staff</button>
-          <button class="tab-btn" id="logTab-teacher" onclick="switchLogTab('teacher')">👨‍🏫 Teachers</button>
+      <div class="card-header" style="background:#fafafa; display:flex; gap:12px; flex-wrap:wrap; align-items:center; z-index:10; position:relative;">
+        <div style="font-size:13px; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Filters:</div>
+        
+        <select id="logRoleFilter" onchange="filterLogs()" class="form-control" style="width:auto; min-width:160px; padding:8px 12px; font-size:13px;">
+          <option value="all">🌐 All Roles</option>
+          <option value="admin">🔐 Admins & Staff</option>
+          <option value="teacher">👨‍🏫 Teachers</option>
+        </select>
+
+        <select id="logUserFilter" onchange="filterLogs()" class="form-control" style="width:auto; min-width:160px; padding:8px 12px; font-size:13px;">
+          <option value="all">👥 All Users</option>
+          ${uniqueUsers.map(u => `<option value="${escHtml(u)}">${escHtml(u)}</option>`).join('')}
+        </select>
+
+        <div id="multiSelectContainer" style="position:relative; width:auto; min-width:200px;">
+            <div class="form-control" onclick="toggleActionDropdown(event)" style="cursor:pointer; padding:8px 12px; font-size:13px; display:flex; justify-content:space-between; align-items:center; background:white; user-select:none;">
+                <span id="actionSelectLabel">⚡ All Actions</span>
+                <span style="font-size:10px; color:#94a3b8;">▼</span>
+            </div>
+            
+            <div id="actionDropdown" style="display:none; position:absolute; top:100%; left:0; width:250px; background:white; border:1px solid var(--border); box-shadow:0 10px 25px rgba(0,0,0,0.15); border-radius:8px; max-height:350px; overflow-y:auto; z-index:9999; margin-top:4px;">
+                <div style="padding:8px 12px; border-bottom:1px solid var(--border); background:#f8fafc; position:sticky; top:0; z-index:2;">
+                    <label style="display:flex; align-items:center; gap:8px; margin:0; cursor:pointer; font-weight:700; font-size:13px; color:var(--primary-dark);">
+                        <input type="checkbox" id="chkAllActions" checked onchange="toggleAllLogActions(this.checked)" style="transform:scale(1.1);"> Select / Deselect All
+                    </label>
+                </div>
+                <div id="actionCheckboxes" style="padding:4px 0;">
+                    ${uniqueActions.map(a => `
+                        <label style="display:flex; align-items:center; gap:8px; padding:8px 12px; margin:0; cursor:pointer; font-size:13px; transition:background 0.2s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">
+                            <input type="checkbox" class="log-action-chk" value="${escHtml(a)}" checked onchange="updateActionFilter()" style="transform:scale(1.1);"> ${escHtml(a)}
+                        </label>
+                    `).join('')}
+                </div>
+            </div>
         </div>
-        <div style="flex:1"></div>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <select id="logUserFilter" onchange="filterLogs()" class="form-control" style="min-width:150px; font-size:13px; padding:6px 10px;">
-            <option value="all">👥 All Users</option>
-            ${uniqueUsers.map(u => `<option value="${escHtml(u)}">${escHtml(u)}</option>`).join('')}
-          </select>
-          <select id="logActionFilter" onchange="filterLogs()" class="form-control" style="min-width:150px; font-size:13px; padding:6px 10px;">
-            <option value="all">⚡ All Actions</option>
-            ${uniqueActions.map(a => `<option value="${escHtml(a)}">${escHtml(a)}</option>`).join('')}
-          </select>
-          <input type="date" id="logDateFilter" onchange="filterLogs()" class="form-control" style="font-size:13px; padding:6px 10px;">
-          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('logDateFilter').value=''; filterLogs();">Clear Date</button>
+
+        <div style="display:flex; align-items:center; gap:8px;">
+            <input type="date" id="logDateFilter" onchange="filterLogs()" class="form-control" style="padding:8px 12px; font-size:13px;">
+            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('logDateFilter').value=''; filterLogs();">Clear Date</button>
         </div>
       </div>
       
@@ -326,32 +333,79 @@ async function loadAuditLogs() {
     </div>
   `);
 
-  window._currentLogRole = 'admin'; // Default tab
+  // --- Multi-Select Dropdown Logic ---
+  
+  // Close the custom dropdown if the user clicks anywhere outside of it
+  document.addEventListener('click', function(event) {
+      const container = document.getElementById('multiSelectContainer');
+      const dropdown = document.getElementById('actionDropdown');
+      if (container && dropdown && !container.contains(event.target)) {
+          dropdown.style.display = 'none';
+      }
+  });
 
-  window.switchLogTab = (roleType) => {
-    document.getElementById('logTab-admin').classList.remove('active');
-    document.getElementById('logTab-teacher').classList.remove('active');
-    document.getElementById(`logTab-${roleType}`).classList.add('active');
-    window._currentLogRole = roleType;
-    filterLogs();
+  window.toggleActionDropdown = (e) => {
+      e.stopPropagation();
+      const drop = document.getElementById('actionDropdown');
+      drop.style.display = drop.style.display === 'none' ? 'block' : 'none';
   };
 
+  window.toggleAllLogActions = (checked) => {
+      document.querySelectorAll('.log-action-chk').forEach(cb => cb.checked = checked);
+      updateActionFilter(true);
+  };
+
+  window.updateActionFilter = (skipSelectAllCheck = false) => {
+      const cbs = document.querySelectorAll('.log-action-chk');
+      const checkedCbs = Array.from(cbs).filter(cb => cb.checked);
+      
+      if (!skipSelectAllCheck) {
+          document.getElementById('chkAllActions').checked = (cbs.length === checkedCbs.length);
+      }
+      
+      const label = document.getElementById('actionSelectLabel');
+      if (checkedCbs.length === cbs.length) {
+          label.innerHTML = '⚡ All Actions';
+      } else if (checkedCbs.length === 0) {
+          label.innerHTML = '⚡ None Selected';
+      } else {
+          label.innerHTML = `⚡ ${checkedCbs.length} Selected`;
+      }
+      
+      filterLogs();
+  };
+
+  // --- Filtering Engine ---
+
   window.filterLogs = () => {
+    const r = document.getElementById('logRoleFilter').value;
     const u = document.getElementById('logUserFilter').value;
-    const a = document.getElementById('logActionFilter').value;
     const d = document.getElementById('logDateFilter').value; 
+    
+    // Get array of all currently checked action boxes
+    const selectedActions = Array.from(document.querySelectorAll('.log-action-chk:checked')).map(cb => cb.value);
 
     const filtered = window._allLogs.filter(l => {
       const isTeacherLog = l.role === 'teacher';
-      if (window._currentLogRole === 'teacher' && !isTeacherLog) return false;
-      if (window._currentLogRole === 'admin' && isTeacherLog) return false;
+      
+      // 1. Role Filter
+      if (r === 'teacher' && !isTeacherLog) return false;
+      if (r === 'admin' && isTeacherLog) return false;
+      
+      // 2. User & Date Filter
       const logDate = l.created_at ? l.created_at.split('T')[0].split(' ')[0] : '';
-      return (u === 'all' || l.full_name === u) && (a === 'all' || l.action === a) && (!d || logDate === d);
+      const matchUser = (u === 'all' || l.full_name === u);
+      const matchDate = (!d || logDate === d);
+      
+      // 3. Multi-Action Filter
+      const matchAction = selectedActions.includes(l.action);
+
+      return matchUser && matchDate && matchAction;
     });
 
     const tbody = document.getElementById('auditLogsBody');
     if (!filtered.length) {
-      tbody.innerHTML = '<tr><td colspan="4" class="text-muted" style="text-align:center; padding:30px;">No logs match your filters.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="4" class="text-muted" style="text-align:center; padding:30px;">No logs match your current filters.</td></tr>';
       return;
     }
 
@@ -374,9 +428,9 @@ async function loadAuditLogs() {
       </tr>
     `).join('');
   };
+  
   filterLogs();
 }
-
 // ================================================================
 // USERS SECTION (With Bulk Select & Filters)
 // ================================================================
@@ -1571,12 +1625,13 @@ window.assignCourseToClass = async (gradeName) => {
 
 window.printClassReportCards = async (gradeName) => {
     // Visual feedback so the user knows the system is working
-    const btn = document.querySelector('#modalBody .btn-primary');
+    const btn = document.querySelector('button[onclick*="printClassReportCards"]');
     const originalText = btn.innerHTML;
     btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:6px"></div> Generating...';
     btn.disabled = true;
 
     try {
+        // Fetch all students for this grade
         // Fetch all students for this grade
         const users = await api('/api/admin/users');
         const students = users.filter(u => u.role === 'student' && (u.grade === gradeName || (gradeName === 'Unassigned' && !u.grade)));
@@ -2064,4 +2119,105 @@ window.openPaymentPortal = async (sid, name) => {
     html += `</tbody></table>`;
     
     document.getElementById('modalBody').innerHTML = html;
+};
+
+
+// ================================================================
+// TRASH BIN SYSTEM
+// ================================================================
+
+async function loadTrashBin(activeTab = 'trash-users') {
+  setPageTitle('Trash Bin');
+  setActiveSidebar('trash');
+  setContent('<div class="loading-state"><div class="spinner"></div></div>');
+
+  const trash = await api('/api/admin/trash');
+
+  setContent(`
+    <div class="page-header page-header-row">
+      <div>
+        <h1>🗑️ Trash Bin</h1>
+        <p>Safely restore accidentally deleted records, or permanently destroy them.</p>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab(this,'trash-users')">👥 Users (${trash.users.length})</button>
+      <button class="tab-btn" onclick="switchTab(this,'trash-courses')">📚 Courses (${trash.courses.length})</button>
+      <button class="tab-btn" onclick="switchTab(this,'trash-fees')">💰 Fees (${trash.fees.length})</button>
+    </div>
+
+    <div id="trash-users" class="tab-panel card" style="display:block">
+      <div class="table-wrapper">
+        <table style="width:100%; font-size:13px;">
+          <thead style="background:#f8fafc;"><tr><th>Name</th><th>Username</th><th>Role</th><th style="text-align:right">Action</th></tr></thead>
+          <tbody>
+            ${trash.users.map(u => `<tr>
+              <td><strong>${escHtml(u.full_name)}</strong></td><td><code>${escHtml(u.username)}</code></td>
+              <td><span class="badge badge-gray">${u.role.toUpperCase()}</span></td>
+              <td style="text-align:right;">
+                <button class="btn btn-success btn-xs" onclick="restoreItem('user', ${u.id})">♻️ Restore</button>
+                <button class="btn btn-danger btn-xs" onclick="destroyItem('user', ${u.id})">💥 Destroy</button>
+              </td>
+            </tr>`).join('') || '<tr><td colspan="4" class="text-center text-muted" style="padding:20px;">No deleted users.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="trash-courses" class="tab-panel card" style="display:none">
+      <div class="table-wrapper">
+        <table style="width:100%; font-size:13px;">
+          <thead style="background:#f8fafc;"><tr><th>Course Name</th><th>Code</th><th style="text-align:right">Action</th></tr></thead>
+          <tbody>
+            ${trash.courses.map(c => `<tr>
+              <td><strong>${escHtml(c.name)}</strong></td><td><span class="badge badge-blue">${escHtml(c.code)}</span></td>
+              <td style="text-align:right;">
+                <button class="btn btn-success btn-xs" onclick="restoreItem('course', ${c.id})">♻️ Restore</button>
+                <button class="btn btn-danger btn-xs" onclick="destroyItem('course', ${c.id})">💥 Destroy</button>
+              </td>
+            </tr>`).join('') || '<tr><td colspan="3" class="text-center text-muted" style="padding:20px;">No deleted courses.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="trash-fees" class="tab-panel card" style="display:none">
+      <div class="table-wrapper">
+        <table style="width:100%; font-size:13px;">
+          <thead style="background:#f8fafc;"><tr><th>Student</th><th>Amount / Type</th><th>Date</th><th style="text-align:right">Action</th></tr></thead>
+          <tbody>
+            ${trash.fees.map(f => `<tr>
+              <td><strong>${escHtml(f.student_name)}</strong></td>
+              <td>LKR ${f.amount.toLocaleString()} <span class="badge badge-purple">${f.payment_type}</span></td>
+              <td>${f.paid_date}</td>
+              <td style="text-align:right;">
+                <button class="btn btn-success btn-xs" onclick="restoreItem('fee', ${f.id})">♻️ Restore</button>
+                <button class="btn btn-danger btn-xs" onclick="destroyItem('fee', ${f.id})">💥 Destroy</button>
+              </td>
+            </tr>`).join('') || '<tr><td colspan="4" class="text-center text-muted" style="padding:20px;">No deleted fees.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `);
+}
+
+window.restoreItem = async (type, id) => {
+    try {
+        await apiJSON('/api/admin/trash/restore', { type, id });
+        showToast('Successfully restored!', 'success');
+        const activeTab = document.querySelector('.tab-btn.active').getAttribute('onclick').match(/'([^']+)'/)[1];
+        loadTrashBin(activeTab);
+    } catch(e) { showToast(e.message, 'error'); }
+};
+
+window.destroyItem = async (type, id) => {
+    if (!confirm('WARNING: Are you sure you want to PERMANENTLY destroy this record? All linked history will be wiped. This CANNOT be undone!')) return;
+    try {
+        await apiJSON('/api/admin/trash/permanent', { type, id });
+        showToast('Record destroyed forever.', 'success');
+        const activeTab = document.querySelector('.tab-btn.active').getAttribute('onclick').match(/'([^']+)'/)[1];
+        loadTrashBin(activeTab);
+    } catch(e) { showToast(e.message, 'error'); }
 };

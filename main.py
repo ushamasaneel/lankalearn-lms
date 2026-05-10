@@ -677,7 +677,29 @@ def seed(db):
             except:
                 pass
 
-    db.commit()
+
+          
+    
+    db.commit() # <--- This safely closes the massive block above
+
+    # ========================================================
+    # FOOLPROOF ISOLATED COLUMN CREATOR
+    # ========================================================
+    for t in ['users', 'courses', 'student_fee_payments']:
+        try:
+            with db.cursor() as cur:
+                cur.execute(f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;")
+            db.commit()
+        except Exception:
+            db.rollback() # If it fails, clear the error and keep going!
+            
+        try:
+            with db.cursor() as cur:
+                cur.execute(f"UPDATE {t} SET is_deleted = FALSE WHERE is_deleted IS NULL;")
+            db.commit()
+        except Exception:
+            db.rollback()
+    # ========================================================
 
 # Run init_db when the application starts up on Render
 @app.on_event("startup")
@@ -733,9 +755,17 @@ def dashboard():
 
 @app.post("/api/auth/login")
 def login(response: Response, username: str = Form(...), password: str = Form(...)):
+    # 1. Fetch user WITHOUT mentioning is_deleted in the SQL to prevent crashes
     user = query("SELECT * FROM users WHERE username=?", (username,), one=True)
+    
     if not user or not verify_pw(password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+    # 2. Safely check the deleted status in Python!
+    # If the column doesn't exist yet, user.get() returns None, which safely bypasses this block.
+    if user.get("is_deleted") is True:
+        raise HTTPException(status_code=401, detail="Account has been deleted.")
+        
     sid = str(uuid.uuid4())
     SESSIONS[sid] = user["id"]
     response.set_cookie("session_id", sid, httponly=True, samesite="lax")
@@ -804,17 +834,17 @@ def admin_stats(user=Depends(require_role("admin", "sub_admin", "super_admin")))
 def list_users(user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     db = get_db()
     with db.cursor() as cur:
-        cur.execute("""
-            SELECT column_name FROM information_schema.columns
-            WHERE table_name = 'users'
-        """)
+        cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'users'")
         existing = {row[0] for row in cur.fetchall()}
-    
-    DB_POOL.putconn(db) # <--- Correctly returns the connection to the pool!
+    DB_POOL.putconn(db) 
 
     optional = ["dob", "address", "phone", "notes", "profile_image", "grade", "admission_number"]
     select_cols = ["id", "username", "full_name", "role", "created_at"] + [c for c in optional if c in existing]
-    return query(f"SELECT {', '.join(select_cols)} FROM users ORDER BY role, full_name")
+    
+    # SMART FALLBACK: Only filter by deleted if the column actually exists!
+    where_clause = "WHERE is_deleted=FALSE" if "is_deleted" in existing else ""
+    
+    return query(f"SELECT {', '.join(select_cols)} FROM users {where_clause} ORDER BY role, full_name")
 
     
 
@@ -938,13 +968,16 @@ def delete_grade_fee(grade_name: str, user=Depends(require_role("admin", "super_
 
 @app.delete("/api/admin/fee-payments/{pid}")
 def delete_fee_payment(pid: int, user=Depends(require_role("admin", "super_admin", "sub_admin"))):
-    """Safely deletes a fee payment and logs the exact amount and student."""
+    """Safely soft-deletes a fee payment and logs the exact amount and student."""
     payment = query("SELECT amount, student_id FROM student_fee_payments WHERE id=?", (pid,), one=True)
     if payment:
         student = query("SELECT full_name FROM users WHERE id=?", (payment["student_id"],), one=True)
         student_name = student["full_name"] if student else "Unknown"
-        execute("DELETE FROM student_fee_payments WHERE id=?", (pid,))
-        log_audit(user["id"], "Deleted Fee Payment", f"Reverted LKR {payment['amount']} payment for {student_name}")
+        
+        # SOFT DELETE
+        execute("UPDATE student_fee_payments SET is_deleted=TRUE WHERE id=?", (pid,))
+        log_audit(user["id"], "Soft Deleted Fee Payment", f"Sent LKR {payment['amount']} payment for {student_name} to trash")
+        
     return {"ok": True}
 
 @app.get("/hard-reset-fees")
@@ -1052,7 +1085,7 @@ def get_student_fees_hybrid(sid: int, user=Depends(require_role("admin", "super_
         SELECT p.*, u.full_name as recorded_by_name
         FROM student_fee_payments p
         LEFT JOIN users u ON p.recorded_by = u.id
-        WHERE p.student_id=? ORDER BY p.paid_date DESC
+        WHERE p.student_id=? AND p.is_deleted=FALSE ORDER BY p.paid_date DESC
     """, (sid,))
     
     return {
@@ -1064,8 +1097,7 @@ def get_student_fees_hybrid(sid: int, user=Depends(require_role("admin", "super_
 
 @app.get("/api/admin/all-fee-payments")
 def get_all_fee_payments(user=Depends(require_role("admin", "super_admin", "sub_admin"))):
-    """Returns a lightweight map of all monthly payments to power the frontend arrears filter"""
-    return query("SELECT student_id, fee_month FROM student_fee_payments WHERE payment_type='monthly'")
+    return query("SELECT student_id, fee_month FROM student_fee_payments WHERE payment_type='monthly' AND is_deleted=FALSE")
 
 @app.post("/api/admin/students/{sid}/fee-payments")
 def add_fee_payment_hybrid(
@@ -1202,52 +1234,55 @@ def delete_user(uid: int, user=Depends(require_role("admin", "sub_admin", "super
     if uid == user["id"]:
         raise HTTPException(400, "Cannot delete yourself")
     
-    db = get_db()
-    try:
-        # We use a standard cursor here to avoid the "tuple indices" error
-        with db.cursor() as cur:
-            cur.execute("SELECT role, full_name FROM users WHERE id=%s", (uid,))
-            res = cur.fetchone()
-            if not res: return {"ok": True}
-            
-            user_role, user_name = res[0], res[1]
-            
-            # --- SECURITY CHECK ---
-            if user["role"] == "sub_admin" and user_role in ("admin", "sub_admin", "super_admin"):
-                raise HTTPException(403, "Office staff cannot delete Admin or Office Staff accounts.")
-            
-            if user_role == "teacher":
-                cur.execute("UPDATE courses SET teacher_id=NULL WHERE teacher_id=%s", (uid,))
-                cur.execute("DELETE FROM announcements WHERE author_id=%s", (uid,))
-            elif user_role == "student":
-                cur.execute("DELETE FROM enrollments WHERE student_id=%s", (uid,))
-                cur.execute("DELETE FROM attendance WHERE student_id=%s", (uid,))
-                cur.execute("DELETE FROM quiz_answers WHERE student_id=%s", (uid,))
-                cur.execute("DELETE FROM quiz_submissions WHERE student_id=%s", (uid,))
-                cur.execute("DELETE FROM submissions WHERE student_id=%s", (uid,))
-                
-            cur.execute("DELETE FROM discussion_posts WHERE author_id=%s", (uid,))
-            cur.execute("DELETE FROM users WHERE id=%s", (uid,))
-        db.commit()
+    # 1. Fetch the user details first
+    target_user = query("SELECT role, full_name FROM users WHERE id=?", (uid,), one=True)
+    if not target_user: 
+        return {"ok": True}
         
-        # --- LOG ACTION ---
-        log_audit(user["id"], "Deleted User", f"{user_name} ({user_role})")
+    user_role = target_user["role"]
+    user_name = target_user["full_name"]
+    
+    # 2. --- SECURITY CHECK: Keep this! ---
+    if user["role"] == "sub_admin" and user_role in ("admin", "sub_admin", "super_admin"):
+        raise HTTPException(403, "Office staff cannot delete Admin or Office Staff accounts.")
         
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(500, f"Failed to delete user: {str(e)}")
-    finally:
-        DB_POOL.putconn(db)
-        
+    # 3. --- SOFT DELETE INSTEAD OF HARD DELETE ---
+    # We no longer need the massive DB cursor block to clear out enrollments and grades!
+    execute("UPDATE users SET is_deleted=TRUE WHERE id=?", (uid,))
+    
+    # 4. --- LOG ACTION ---
+    log_audit(user["id"], "Soft Deleted User", f"Sent {user_name} ({user_role}) to Trash")
+    
     return {"ok": True}
 
 @app.get("/api/admin/courses")
 def admin_list_courses(user=Depends(require_role("admin", "sub_admin", "super_admin"))):
-    return query("""
-        SELECT c.*, u.full_name as teacher_name
-        FROM courses c LEFT JOIN users u ON c.teacher_id=u.id
-        ORDER BY c.code
-    """)
+    db = get_db()
+    try:
+        # Check if the column exists first to prevent crashes
+        with db.cursor() as cur:
+            cur.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'courses' AND column_name = 'is_deleted'
+            """)
+            has_is_deleted = cur.fetchone() is not None
+
+        if has_is_deleted:
+            return query("""
+                SELECT c.*, u.full_name as teacher_name
+                FROM courses c LEFT JOIN users u ON c.teacher_id=u.id
+                WHERE c.is_deleted=FALSE ORDER BY c.code
+            """, db=db)
+        else:
+            # Fallback if the column hasn't been created yet
+            return query("""
+                SELECT c.*, u.full_name as teacher_name
+                FROM courses c LEFT JOIN users u ON c.teacher_id=u.id
+                ORDER BY c.code
+            """, db=db)
+    finally:
+        DB_POOL.putconn(db)
 
 @app.post("/api/admin/courses")
 def create_course(code: str = Form(...), name: str = Form(...),
@@ -1279,59 +1314,14 @@ def update_course(cid: int, code: str = Form(...), name: str = Form(...),
 
 @app.delete("/api/admin/courses/{cid}")
 def delete_course(cid: int, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
-    # Fetch the name BEFORE deleting it
+    # Fetch the name BEFORE deleting it for the log
     course = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)
     course_name = course["name"] if course else f"ID {cid}"
     
-    # We must manually clear all dependent data first to satisfy Database Foreign Key constraints
-    db = get_db()
-    try:
-        with db.cursor() as cur:
-            # 1. Enrollments & Attendance & Syllabus
-            cur.execute("DELETE FROM enrollments WHERE course_id=%s", (cid,))
-            cur.execute("DELETE FROM attendance WHERE course_id=%s", (cid,))
-            cur.execute("DELETE FROM syllabus WHERE course_id=%s", (cid,))
-            
-            # 2. Modules
-            cur.execute("DELETE FROM module_items WHERE module_id IN (SELECT id FROM modules WHERE course_id=%s)", (cid,))
-            cur.execute("DELETE FROM modules WHERE course_id=%s", (cid,))
-            
-            # 3. Quizzes
-            cur.execute("DELETE FROM quiz_answers WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=%s)", (cid,))
-            cur.execute("DELETE FROM quiz_submissions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=%s)", (cid,))
-            cur.execute("DELETE FROM quiz_options WHERE question_id IN (SELECT id FROM quiz_questions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=%s))", (cid,))
-            cur.execute("DELETE FROM quiz_questions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=%s)", (cid,))
-            cur.execute("DELETE FROM quizzes WHERE course_id=%s", (cid,))
-            
-            # 4. Assignments
-            cur.execute("DELETE FROM submissions WHERE assignment_id IN (SELECT id FROM assignments WHERE course_id=%s)", (cid,))
-            cur.execute("DELETE FROM assignments WHERE course_id=%s", (cid,))
-            
-            # 5. Discussions
-            cur.execute("DELETE FROM discussion_posts WHERE discussion_id IN (SELECT id FROM discussions WHERE course_id=%s)", (cid,))
-            cur.execute("DELETE FROM discussions WHERE course_id=%s", (cid,))
-            
-            # 6. Rubrics
-            cur.execute("DELETE FROM rubric_criteria WHERE rubric_id IN (SELECT id FROM rubrics WHERE course_id=%s)", (cid,))
-            cur.execute("DELETE FROM rubrics WHERE course_id=%s", (cid,))
-            
-            # 7. Basic Items
-            cur.execute("DELETE FROM materials WHERE course_id=%s", (cid,))
-            cur.execute("DELETE FROM pages WHERE course_id=%s", (cid,))
-            cur.execute("DELETE FROM announcements WHERE course_id=%s", (cid,))
-            
-            # 8. Finally, safely delete the course itself
-            cur.execute("DELETE FROM courses WHERE id=%s", (cid,))
-            
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(500, f"Failed to delete course: {str(e)}")
-    finally:
-        DB_POOL.putconn(db)
-
-    log_audit(user["id"], "Deleted Course", f"Course: {course_name}")    
-        
+    # SOFT DELETE: Just hide it! No need to manually wipe child tables anymore.
+    execute("UPDATE courses SET is_deleted=TRUE WHERE id=?", (cid,))
+    
+    log_audit(user["id"], "Soft Deleted Course", f"Course: {course_name}")    
     return {"ok": True}
 
 
@@ -1343,40 +1333,17 @@ async def bulk_delete_users(request: Request, user=Depends(require_role("admin",
     ids = [int(i) for i in data.get("ids", []) if int(i) != user["id"]] # Prevent deleting oneself
     if not ids: return {"ok": True}
     
-    db = get_db()
-    try:
-        with db.cursor() as cur:
-            format_strings = ','.join(['%s'] * len(ids))
-            cur.execute(f"SELECT id, role FROM users WHERE id IN ({format_strings})", tuple(ids))
-            users_to_delete = cur.fetchall()
-            
-            teacher_ids = [u[0] for u in users_to_delete if u[1] == 'teacher']
-            student_ids = [u[0] for u in users_to_delete if u[1] == 'student']
-            
-            if teacher_ids:
-                t_format = ','.join(['%s'] * len(teacher_ids))
-                cur.execute(f"UPDATE courses SET teacher_id=NULL WHERE teacher_id IN ({t_format})", tuple(teacher_ids))
-                cur.execute(f"DELETE FROM announcements WHERE author_id IN ({t_format})", tuple(teacher_ids))
-                
-            if student_ids:
-                s_format = ','.join(['%s'] * len(student_ids))
-                cur.execute(f"DELETE FROM enrollments WHERE student_id IN ({s_format})", tuple(student_ids))
-                cur.execute(f"DELETE FROM attendance WHERE student_id IN ({s_format})", tuple(student_ids))
-                cur.execute(f"DELETE FROM quiz_answers WHERE student_id IN ({s_format})", tuple(student_ids))
-                cur.execute(f"DELETE FROM quiz_submissions WHERE student_id IN ({s_format})", tuple(student_ids))
-                cur.execute(f"DELETE FROM submissions WHERE student_id IN ({s_format})", tuple(student_ids))
-                cur.execute(f"DELETE FROM student_fee_payments WHERE student_id IN ({s_format})", tuple(student_ids))
-                
-            cur.execute(f"DELETE FROM discussion_posts WHERE author_id IN ({format_strings})", tuple(ids))
-            cur.execute(f"DELETE FROM users WHERE id IN ({format_strings})", tuple(ids))
-        db.commit()
-        log_audit(user["id"], "Bulk Deleted Users", f"Deleted {len(ids)} users.")
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(500, f"Failed bulk delete: {str(e)}")
-    finally:
-        DB_POOL.putconn(db)
+    format_strings = ','.join(['?'] * len(ids))
+    
+    # Optional clean-up: Unassign soft-deleted teachers from their courses so they don't show as active
+    execute(f"UPDATE courses SET teacher_id=NULL WHERE teacher_id IN ({format_strings})", tuple(ids))
+    
+    # SOFT DELETE
+    execute(f"UPDATE users SET is_deleted=TRUE WHERE id IN ({format_strings})", tuple(ids))
+    
+    log_audit(user["id"], "Bulk Soft Deleted Users", f"Sent {len(ids)} users to trash.")
     return {"ok": True}
+
 
 @app.post("/api/admin/courses/bulk-delete")
 async def bulk_delete_courses(request: Request, user=Depends(require_role("admin", "super_admin"))):
@@ -1384,38 +1351,12 @@ async def bulk_delete_courses(request: Request, user=Depends(require_role("admin
     ids = [int(i) for i in data.get("ids", [])]
     if not ids: return {"ok": True}
     
-    db = get_db()
-    try:
-        with db.cursor() as cur:
-            format_strings = ','.join(['%s'] * len(ids))
-            cur.execute(f"DELETE FROM enrollments WHERE course_id IN ({format_strings})", tuple(ids))
-            cur.execute(f"DELETE FROM attendance WHERE course_id IN ({format_strings})", tuple(ids))
-            cur.execute(f"DELETE FROM syllabus WHERE course_id IN ({format_strings})", tuple(ids))
-            cur.execute(f"DELETE FROM module_items WHERE module_id IN (SELECT id FROM modules WHERE course_id IN ({format_strings}))", tuple(ids))
-            cur.execute(f"DELETE FROM modules WHERE course_id IN ({format_strings})", tuple(ids))
-            cur.execute(f"DELETE FROM quiz_answers WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id IN ({format_strings}))", tuple(ids))
-            cur.execute(f"DELETE FROM quiz_submissions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id IN ({format_strings}))", tuple(ids))
-            cur.execute(f"DELETE FROM quiz_options WHERE question_id IN (SELECT id FROM quiz_questions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id IN ({format_strings})))", tuple(ids))
-            cur.execute(f"DELETE FROM quiz_questions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id IN ({format_strings}))", tuple(ids))
-            cur.execute(f"DELETE FROM quizzes WHERE course_id IN ({format_strings})", tuple(ids))
-            cur.execute(f"DELETE FROM submissions WHERE assignment_id IN (SELECT id FROM assignments WHERE course_id IN ({format_strings}))", tuple(ids))
-            cur.execute(f"DELETE FROM assignments WHERE course_id IN ({format_strings})", tuple(ids))
-            cur.execute(f"DELETE FROM discussion_posts WHERE discussion_id IN (SELECT id FROM discussions WHERE course_id IN ({format_strings}))", tuple(ids))
-            cur.execute(f"DELETE FROM discussions WHERE course_id IN ({format_strings})", tuple(ids))
-            cur.execute(f"DELETE FROM rubric_criteria WHERE rubric_id IN (SELECT id FROM rubrics WHERE course_id IN ({format_strings}))", tuple(ids))
-            cur.execute(f"DELETE FROM rubrics WHERE course_id IN ({format_strings})", tuple(ids))
-            cur.execute(f"DELETE FROM materials WHERE course_id IN ({format_strings})", tuple(ids))
-            cur.execute(f"DELETE FROM pages WHERE course_id IN ({format_strings})", tuple(ids))
-            cur.execute(f"DELETE FROM announcements WHERE course_id IN ({format_strings})", tuple(ids))
-            cur.execute(f"DELETE FROM calendar_events WHERE course_id IN ({format_strings})", tuple(ids))
-            cur.execute(f"DELETE FROM courses WHERE id IN ({format_strings})", tuple(ids))
-        db.commit()
-        log_audit(user["id"], "Bulk Deleted Courses", f"Deleted {len(ids)} courses.")
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(500, f"Failed bulk delete: {str(e)}")
-    finally:
-        DB_POOL.putconn(db)
+    format_strings = ','.join(['?'] * len(ids))
+    
+    # SOFT DELETE
+    execute(f"UPDATE courses SET is_deleted=TRUE WHERE id IN ({format_strings})", tuple(ids))
+    
+    log_audit(user["id"], "Bulk Soft Deleted Courses", f"Sent {len(ids)} courses to trash.")
     return {"ok": True}
 
 
@@ -1455,6 +1396,138 @@ def unenroll_student(cid: int, sid: int, user=Depends(require_role("admin", "sub
 @app.get("/api/admin/teachers")
 def list_teachers(user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     return query("SELECT id,full_name FROM users WHERE role='teacher' ORDER BY full_name")
+
+
+
+
+# ================================================================
+# TRASH BIN SYSTEM
+# ================================================================
+
+@app.get("/api/admin/trash")
+def get_trash(user=Depends(require_role("admin", "super_admin"))):
+    return {
+        "users": query("SELECT id, full_name, role, username FROM users WHERE is_deleted=TRUE ORDER BY full_name"),
+        "courses": query("SELECT id, code, name FROM courses WHERE is_deleted=TRUE ORDER BY name"),
+        "fees": query("""SELECT p.id, p.amount, p.payment_type, p.paid_date, u.full_name as student_name 
+                         FROM student_fee_payments p JOIN users u ON p.student_id=u.id 
+                         WHERE p.is_deleted=TRUE ORDER BY p.paid_date DESC""")
+    }
+
+@app.post("/api/admin/trash/restore")
+async def restore_trash(request: Request, user=Depends(require_role("admin", "super_admin"))):
+    data = await request.json()
+    item_type = data.get("type")
+    item_id = data.get("id")
+    
+    db = get_db()
+    try:
+        # 1. Fetch the exact name BEFORE restoring
+        item_name = f"ID {item_id}"
+        with db.cursor() as cur:
+            if item_type == "user":
+                cur.execute("SELECT full_name FROM users WHERE id=%s", (item_id,))
+                res = cur.fetchone()
+                if res: item_name = res[0]
+            elif item_type == "course":
+                cur.execute("SELECT name FROM courses WHERE id=%s", (item_id,))
+                res = cur.fetchone()
+                if res: item_name = res[0]
+            elif item_type == "fee":
+                cur.execute("SELECT amount, student_id FROM student_fee_payments WHERE id=%s", (item_id,))
+                f = cur.fetchone()
+                if f:
+                    cur.execute("SELECT full_name FROM users WHERE id=%s", (f[1],))
+                    stu = cur.fetchone()
+                    stu_name = stu[0] if stu else 'Unknown'
+                    item_name = f"LKR {f[0]} payment for {stu_name}"
+
+        # 2. Restore the item
+        table = "users" if item_type == "user" else "courses" if item_type == "course" else "student_fee_payments"
+        with db.cursor() as cur:
+            cur.execute(f"UPDATE {table} SET is_deleted=FALSE WHERE id=%s", (item_id,))
+        db.commit()
+        
+        # 3. Log with human-readable names!
+        log_audit(user["id"], f"Restored {item_type.title()}", f"Restored: {item_name}")
+        return {"ok": True}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, str(e))
+    finally:
+        DB_POOL.putconn(db)
+
+@app.post("/api/admin/trash/permanent")
+async def permanent_delete_trash(request: Request, user=Depends(require_role("super_admin", "admin"))):
+    data = await request.json()
+    item_type = data.get("type")
+    item_id = data.get("id")
+    
+    db = get_db()
+    try:
+        # 1. Fetch the exact name BEFORE destroying
+        item_name = f"ID {item_id}"
+        with db.cursor() as cur:
+            if item_type == "user":
+                cur.execute("SELECT full_name FROM users WHERE id=%s", (item_id,))
+                res = cur.fetchone()
+                if res: item_name = res[0]
+            elif item_type == "course":
+                cur.execute("SELECT name FROM courses WHERE id=%s", (item_id,))
+                res = cur.fetchone()
+                if res: item_name = res[0]
+            elif item_type == "fee":
+                cur.execute("SELECT amount, student_id FROM student_fee_payments WHERE id=%s", (item_id,))
+                f = cur.fetchone()
+                if f:
+                    cur.execute("SELECT full_name FROM users WHERE id=%s", (f[1],))
+                    stu = cur.fetchone()
+                    stu_name = stu[0] if stu else 'Unknown'
+                    item_name = f"LKR {f[0]} payment for {stu_name}"
+
+            # 2. Perform the destructive deletions
+            if item_type == "user":
+                cur.execute("DELETE FROM enrollments WHERE student_id=%s", (item_id,))
+                cur.execute("DELETE FROM attendance WHERE student_id=%s", (item_id,))
+                cur.execute("DELETE FROM quiz_submissions WHERE student_id=%s", (item_id,))
+                cur.execute("DELETE FROM submissions WHERE student_id=%s", (item_id,))
+                cur.execute("DELETE FROM student_fee_payments WHERE student_id=%s", (item_id,))
+                cur.execute("UPDATE courses SET teacher_id=NULL WHERE teacher_id=%s", (item_id,))
+                cur.execute("DELETE FROM users WHERE id=%s", (item_id,))
+            elif item_type == "course":
+                cur.execute("DELETE FROM enrollments WHERE course_id=%s", (item_id,))
+                cur.execute("DELETE FROM attendance WHERE course_id=%s", (item_id,))
+                cur.execute("DELETE FROM syllabus WHERE course_id=%s", (item_id,))
+                cur.execute("DELETE FROM module_items WHERE module_id IN (SELECT id FROM modules WHERE course_id=%s)", (item_id,))
+                cur.execute("DELETE FROM modules WHERE course_id=%s", (item_id,))
+                cur.execute("DELETE FROM quiz_answers WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=%s)", (item_id,))
+                cur.execute("DELETE FROM quiz_submissions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=%s)", (item_id,))
+                cur.execute("DELETE FROM quiz_options WHERE question_id IN (SELECT id FROM quiz_questions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=%s))", (item_id,))
+                cur.execute("DELETE FROM quiz_questions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=%s)", (item_id,))
+                cur.execute("DELETE FROM quizzes WHERE course_id=%s", (item_id,))
+                cur.execute("DELETE FROM submissions WHERE assignment_id IN (SELECT id FROM assignments WHERE course_id=%s)", (item_id,))
+                cur.execute("DELETE FROM assignments WHERE course_id=%s", (item_id,))
+                cur.execute("DELETE FROM discussion_posts WHERE discussion_id IN (SELECT id FROM discussions WHERE course_id=%s)", (item_id,))
+                cur.execute("DELETE FROM discussions WHERE course_id=%s", (item_id,))
+                cur.execute("DELETE FROM rubric_criteria WHERE rubric_id IN (SELECT id FROM rubrics WHERE course_id=%s)", (item_id,))
+                cur.execute("DELETE FROM rubrics WHERE course_id=%s", (item_id,))
+                cur.execute("DELETE FROM materials WHERE course_id=%s", (item_id,))
+                cur.execute("DELETE FROM pages WHERE course_id=%s", (item_id,))
+                cur.execute("DELETE FROM announcements WHERE course_id=%s", (item_id,))
+                cur.execute("DELETE FROM calendar_events WHERE course_id=%s", (item_id,))
+                cur.execute("DELETE FROM courses WHERE id=%s", (item_id,))
+            elif item_type == "fee":
+                cur.execute("DELETE FROM student_fee_payments WHERE id=%s", (item_id,))
+        db.commit()
+        
+        # 3. Log with human-readable names!
+        log_audit(user["id"], f"Permanently Deleted {item_type.title()}", f"Destroyed: {item_name}")
+        return {"ok": True}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, str(e))
+    finally:
+        DB_POOL.putconn(db)
 
 # ---------------------------------------------------------------------------
 # Teacher API - courses
@@ -2328,186 +2401,118 @@ async def save_attendance(cid: int, request: Request, user=Depends(require_role(
         
     log_audit(user["id"], "Saved Attendance", f"Course: {course['name']} | Date: {date} | Records: {len(data['records'])}")
     return {"ok": True}
-
 @app.get("/fix-db")
 def fix_database():
     db = get_db()
     results = []
+    
+    # ========================================================
+    # BLOCK 1: FOOLPROOF SOFT DELETE COLUMNS
+    # ========================================================
+    for t in ['users', 'courses', 'student_fee_payments']:
+        try:
+            with db.cursor() as cur:
+                cur.execute(f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;")
+            db.commit()
+            results.append(f"OK: Added is_deleted to {t}")
+        except Exception as e:
+            db.rollback() # Safely ignore and continue
+            results.append(f"SKIP: {t}.is_deleted ({e})")
+            
+        try:
+            with db.cursor() as cur:
+                cur.execute(f"UPDATE {t} SET is_deleted = FALSE WHERE is_deleted IS NULL;")
+            db.commit()
+        except Exception:
+            db.rollback()
+
+    # ========================================================
+    # BLOCK 2: MISSING USER COLUMNS
+    # ========================================================
+    columns = [
+        ("users", "dob", "TEXT"), ("users", "address", "TEXT"), ("users", "phone", "TEXT"),
+        ("users", "notes", "TEXT"), ("users", "profile_image", "TEXT"), 
+        ("users", "grade", "TEXT"), ("users", "admission_number", "TEXT"),
+        ("users", "must_change_password", "BOOLEAN DEFAULT FALSE"),
+        ("courses", "grade", "TEXT")
+    ]
+    for table, col, col_type in columns:
+        try:
+            with db.cursor() as cur:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {col_type};")
+            db.commit()
+        except Exception:
+            db.rollback()
+
+    # ========================================================
+    # BLOCK 3: GENERAL TABLES & CONSTRAINTS
+    # ========================================================
     try:
         with db.cursor() as cur:
-            # Add grade to courses
-            cur.execute("ALTER TABLE courses ADD COLUMN IF NOT EXISTS grade TEXT;")
-            # ---- Missing user columns ----
-            columns = [
-                ("users", "dob",              "TEXT"),
-                ("users", "address",          "TEXT"),
-                ("users", "phone",            "TEXT"),
-                ("users", "notes",            "TEXT"),
-                ("users", "profile_image",    "TEXT"),
-                ("users", "grade",            "TEXT"),
-                ("users", "admission_number", "TEXT"),
-            ]
-            for table, col, col_type in columns:
-                try:
-                    cur.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {col_type};")
-                    results.append(f"OK: {table}.{col}")
-                except Exception as e:
-                    results.append(f"SKIP {table}.{col}: {e}")
-
-
-            # Inside your fix_database() try block, add:
-            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE;")        
-
-            # ---- Fee structure table ----
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS student_fee_structure (
-                    id SERIAL PRIMARY KEY,
-                    student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    monthly_fee REAL NOT NULL DEFAULT 0,
-                    currency TEXT NOT NULL DEFAULT 'LKR',
-                    effective_from TEXT NOT NULL,
-                    notes TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-            results.append("OK: student_fee_structure table")
-
-
-            # Add to your main.py database initialization
+            # Broadcast Alerts
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS broadcast_alerts (
-                    id SERIAL PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    target_audience TEXT NOT NULL CHECK(target_audience IN ('all', 'teachers', 'students', 'parents')),
-                    created_by INTEGER REFERENCES users(id),
-                    is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    id SERIAL PRIMARY KEY, title TEXT NOT NULL, message TEXT NOT NULL,
+                    target_audience TEXT NOT NULL, created_by INTEGER REFERENCES users(id),
+                    is_active BOOLEAN DEFAULT TRUE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TEXT
                 );
             """)
-
-            # Add expiry column to existing broadcast table
             cur.execute("ALTER TABLE broadcast_alerts ADD COLUMN IF NOT EXISTS expires_at TEXT;")
-
             cur.execute("ALTER TABLE broadcast_alerts DROP CONSTRAINT IF EXISTS broadcast_alerts_target_audience_check;")
-
-
+            
+            # Class Details
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS class_details (
-                    grade TEXT PRIMARY KEY,
-                    teacher_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+                    grade TEXT PRIMARY KEY, teacher_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+                );
+            """)
+            
+
+            # Class Details
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS class_details (
+                    grade TEXT PRIMARY KEY, teacher_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+                );
+            """)
+            
+            # --- NEW: TIMETABLES ---
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS class_timetables (
+                    id SERIAL PRIMARY KEY,
+                    grade TEXT NOT NULL,
+                    course_id INTEGER REFERENCES courses(id) ON DELETE CASCADE,
+                    day_of_week TEXT NOT NULL,
+                    start_time TEXT NOT NULL,
+                    end_time TEXT NOT NULL
                 );
             """)
 
-        
-            ## ---- HYBRID FEE MANAGEMENT TABLES ----
+            # Hybrid Fees
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS grade_fee_structure (
-                    id SERIAL PRIMARY KEY,
-                    grade_name TEXT UNIQUE NOT NULL,
-                    monthly_tuition REAL NOT NULL
+                    id SERIAL PRIMARY KEY, grade_name TEXT UNIQUE NOT NULL, monthly_tuition REAL NOT NULL
                 );
             """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS student_fee_payments (
-                    id SERIAL PRIMARY KEY,
-                    student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    amount REAL NOT NULL,
-                    payment_type TEXT NOT NULL DEFAULT 'monthly',
-                    payment_for TEXT,
-                    fee_month TEXT, 
-                    paid_date TEXT NOT NULL,
-                    receipt_number TEXT,
-                    notes TEXT,
-                    recorded_by INTEGER REFERENCES users(id),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    id SERIAL PRIMARY KEY, student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    amount REAL NOT NULL, payment_type TEXT NOT NULL DEFAULT 'monthly', payment_for TEXT,
+                    fee_month TEXT, paid_date TEXT NOT NULL, receipt_number TEXT, notes TEXT,
+                    recorded_by INTEGER REFERENCES users(id), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_deleted BOOLEAN DEFAULT FALSE
                 );
             """)
-            # Safely add the column if upgrading an older database
             cur.execute("ALTER TABLE student_fee_payments ADD COLUMN IF NOT EXISTS fee_month TEXT;")
-            results.append("OK: Hybrid Fee tables verified")
-
-
-            # ---- NEW BILLING ENGINE TABLES ----
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS grade_fee_structure (
-                    id SERIAL PRIMARY KEY,
-                    grade_name TEXT UNIQUE NOT NULL,
-                    monthly_tuition REAL NOT NULL,
-                    term_facility_fee REAL DEFAULT 0,
-                    annual_admission_fee REAL DEFAULT 0
-                );
-            """)
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS student_invoices (
-                    id SERIAL PRIMARY KEY,
-                    student_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-                    invoice_month TEXT,
-                    total_amount REAL NOT NULL,
-                    amount_paid REAL DEFAULT 0,
-                    status TEXT DEFAULT 'unpaid',
-                    UNIQUE(student_id, invoice_month) 
-                );
-            """)
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS invoice_payments (
-                    id SERIAL PRIMARY KEY,
-                    invoice_id INTEGER REFERENCES student_invoices(id) ON DELETE CASCADE,
-                    amount REAL NOT NULL,
-                    paid_date TEXT NOT NULL,
-                    receipt_number TEXT,
-                    recorded_by INTEGER REFERENCES users(id)
-                );
-            """)
-            results.append("OK: Automated Billing Engine tables created")
-
-            # ---- Calendar events table (THE UPGRADE) ----
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS calendar_events (
-                    id SERIAL PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    description TEXT,
-                    event_date TEXT,
-                    start_date TEXT,
-                    end_date TEXT,
-                    has_time INTEGER DEFAULT 0,
-                    event_type TEXT NOT NULL CHECK(event_type IN ('global', 'course', 'personal')),
-                    course_id INTEGER REFERENCES courses(id) ON DELETE CASCADE,
-                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
             
-            # Use safe IF NOT EXISTS directly in the SQL to prevent transaction rollbacks
-            cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS start_date TEXT;")
-            cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS end_date TEXT;")
-            cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS has_time INTEGER DEFAULT 0;")
-            
-            results.append("OK: calendar_events upgraded for multi-day support")
-
-# Force add the column safely
-            try:
-                cur.execute("ALTER TABLE student_fee_payments ADD COLUMN fee_month TEXT;")
-                results.append("OK: Forced fee_month column addition")
-            except psycopg2.errors.DuplicateColumn:
-                db.rollback() # It already exists, ignore
-                results.append("SKIP: fee_month already exists")
-            except Exception as e:
-                db.rollback()
-                results.append(f"ERROR adding fee_month: {e}")
-                
-       
-
-
-
         db.commit()
-        return {"status": "All done. Restart not needed — go back to the dashboard.", "details": results}
+        results.append("OK: General tables and constraints verified")
     except Exception as e:
         db.rollback()
-        return {"status": "Error", "details": str(e)}
-    finally:
-        DB_POOL.putconn(db)
+        results.append(f"SKIP: General tables ({e})")
 
+    DB_POOL.putconn(db)
+    return {"status": "SUCCESS: All database tables and columns have been isolated and generated safely.", "details": results}
 
 
 @app.get("/fix-roles")
