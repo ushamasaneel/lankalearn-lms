@@ -238,6 +238,12 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS class_details (
+    grade TEXT PRIMARY KEY,
+    teacher_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
+
 CREATE TABLE IF NOT EXISTS attendance (
     id SERIAL PRIMARY KEY,
     course_id INTEGER NOT NULL REFERENCES courses(id),
@@ -455,7 +461,8 @@ def init_db():
                 ('pages', 'file_name'),
                 ('syllabus', 'file_name'),
                 ('courses', 'start_date'), 
-                ('courses', 'end_date')
+                ('courses', 'end_date'),
+                ('courses', 'grade') # <--- ADD THIS LINE
             ]
             for table, column in tables_to_update:
                 cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name=%s AND column_name=%s",
@@ -732,6 +739,10 @@ def login(response: Response, username: str = Form(...), password: str = Form(..
     sid = str(uuid.uuid4())
     SESSIONS[sid] = user["id"]
     response.set_cookie("session_id", sid, httponly=True, samesite="lax")
+    
+    # LOG THE SIGN IN
+    log_audit(user["id"], "Logged In", "User signed in successfully.")
+    
     return {"id": user["id"], "username": user["username"],
             "full_name": user["full_name"], "role": user["role"],
             "must_change_password": user.get("must_change_password", False)}
@@ -739,6 +750,9 @@ def login(response: Response, username: str = Form(...), password: str = Form(..
 @app.post("/api/auth/logout")
 def logout(response: Response, session_id: Optional[str] = Cookie(default=None)):
     if session_id in SESSIONS:
+        uid = SESSIONS[session_id]
+        # LOG THE SIGN OUT
+        log_audit(uid, "Logged Out", "User signed out.")
         del SESSIONS[session_id]
     response.delete_cookie("session_id")
     return {"ok": True}
@@ -755,6 +769,9 @@ def me(user=Depends(require_user)):
 def change_password(new_password: str = Form(...), user=Depends(require_user)):
     execute("UPDATE users SET password_hash=?, must_change_password=FALSE WHERE id=?", 
             (hash_pw(new_password), user["id"]))
+            
+    # LOG THE PASSWORD CHANGE
+    log_audit(user["id"], "Changed Password", "User updated their private password.")
     return {"ok": True}
 
 @app.post("/api/admin/users/{uid}/reset-password")
@@ -799,9 +816,7 @@ def list_users(user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     select_cols = ["id", "username", "full_name", "role", "created_at"] + [c for c in optional if c in existing]
     return query(f"SELECT {', '.join(select_cols)} FROM users ORDER BY role, full_name")
 
-    optional = ["dob", "address", "phone", "notes", "profile_image", "grade", "admission_number"]
-    select_cols = ["id", "username", "full_name", "role", "created_at"] + [c for c in optional if c in existing]
-    return query(f"SELECT {', '.join(select_cols)} FROM users ORDER BY role, full_name")
+    
 
 @app.get("/api/admin/next-admission")
 def next_admission_number(user=Depends(require_role("admin", "sub_admin", "super_admin"))):
@@ -904,9 +919,6 @@ def get_student_report_card(sid: int, user=Depends(require_role("admin", "super_
 # AUTOMATED BILLING ENGINE
 # ================================================================
 
-@app.get("/api/admin/grade-fees")
-def get_grade_fees(user=Depends(require_role("admin", "super_admin", "sub_admin"))):
-    return query("SELECT * FROM grade_fee_structure ORDER BY grade_name")
 
 @app.post("/api/admin/grade-fees")
 def set_grade_fee(grade_name: str = Form(...), monthly_tuition: float = Form(...), user=Depends(require_role("admin", "super_admin"))):
@@ -921,6 +933,18 @@ def set_grade_fee(grade_name: str = Form(...), monthly_tuition: float = Form(...
 @app.delete("/api/admin/grade-fees/{grade_name}")
 def delete_grade_fee(grade_name: str, user=Depends(require_role("admin", "super_admin"))):
     execute("DELETE FROM grade_fee_structure WHERE grade_name=?", (grade_name,))
+    log_audit(user["id"], "Deleted Master Fee", f"Removed fee structure for {grade_name}")
+    return {"ok": True}
+
+@app.delete("/api/admin/fee-payments/{pid}")
+def delete_fee_payment(pid: int, user=Depends(require_role("admin", "super_admin", "sub_admin"))):
+    """Safely deletes a fee payment and logs the exact amount and student."""
+    payment = query("SELECT amount, student_id FROM student_fee_payments WHERE id=?", (pid,), one=True)
+    if payment:
+        student = query("SELECT full_name FROM users WHERE id=?", (payment["student_id"],), one=True)
+        student_name = student["full_name"] if student else "Unknown"
+        execute("DELETE FROM student_fee_payments WHERE id=?", (pid,))
+        log_audit(user["id"], "Deleted Fee Payment", f"Reverted LKR {payment['amount']} payment for {student_name}")
     return {"ok": True}
 
 @app.get("/hard-reset-fees")
@@ -1036,6 +1060,12 @@ def get_student_fees_hybrid(sid: int, user=Depends(require_role("admin", "super_
         "master_fee": master_fee,
         "payments": [dict(p) for p in payments]
     }
+
+
+@app.get("/api/admin/all-fee-payments")
+def get_all_fee_payments(user=Depends(require_role("admin", "super_admin", "sub_admin"))):
+    """Returns a lightweight map of all monthly payments to power the frontend arrears filter"""
+    return query("SELECT student_id, fee_month FROM student_fee_payments WHERE payment_type='monthly'")
 
 @app.post("/api/admin/students/{sid}/fee-payments")
 def add_fee_payment_hybrid(
@@ -1223,11 +1253,12 @@ def admin_list_courses(user=Depends(require_role("admin", "sub_admin", "super_ad
 def create_course(code: str = Form(...), name: str = Form(...),
                   description: str = Form(""), teacher_id: int = Form(...),
                   start_date: str = Form(""), end_date: str = Form(""),
+                  grade: str = Form(""), # <--- Added Grade
                   user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     try:
-        cid = execute("INSERT INTO courses(code,name,description,teacher_id,start_date,end_date) VALUES(?,?,?,?,?,?)",
-                      (code, name, description, teacher_id, start_date, end_date))
-        log_audit(user["id"], "Created Course", f"Code: {code} | Name: {name}")
+        cid = execute("INSERT INTO courses(code,name,description,teacher_id,start_date,end_date,grade) VALUES(?,?,?,?,?,?,?)",
+                      (code, name, description, teacher_id, start_date, end_date, grade))
+        log_audit(user["id"], "Created Course", f"Code: {code} | Name: {name} | Grade: {grade}")
         return {"id": cid, "message": "Course created"}
     except IntegrityError:
         raise HTTPException(400, "Course code already exists")
@@ -1236,11 +1267,12 @@ def create_course(code: str = Form(...), name: str = Form(...),
 def update_course(cid: int, code: str = Form(...), name: str = Form(...),
                   description: str = Form(""), teacher_id: int = Form(...),
                   start_date: str = Form(""), end_date: str = Form(""),
+                  grade: str = Form(""), # <--- Added Grade
                   user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     try:
-        execute("UPDATE courses SET code=?, name=?, description=?, teacher_id=?, start_date=?, end_date=? WHERE id=?",
-                (code, name, description, teacher_id, start_date, end_date, cid))
-        log_audit(user["id"], "Updated Course", f"Course: {name}") # Now uses name!
+        execute("UPDATE courses SET code=?, name=?, description=?, teacher_id=?, start_date=?, end_date=?, grade=? WHERE id=?",
+                (code, name, description, teacher_id, start_date, end_date, grade, cid))
+        log_audit(user["id"], "Updated Course", f"Course: {name}")
         return {"ok": True}
     except IntegrityError:
         raise HTTPException(400, "Course code already exists")
@@ -1302,14 +1334,100 @@ def delete_course(cid: int, user=Depends(require_role("admin", "sub_admin", "sup
         
     return {"ok": True}
 
+
+
+
+@app.post("/api/admin/users/bulk-delete")
+async def bulk_delete_users(request: Request, user=Depends(require_role("admin", "super_admin"))):
+    data = await request.json()
+    ids = [int(i) for i in data.get("ids", []) if int(i) != user["id"]] # Prevent deleting oneself
+    if not ids: return {"ok": True}
+    
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            format_strings = ','.join(['%s'] * len(ids))
+            cur.execute(f"SELECT id, role FROM users WHERE id IN ({format_strings})", tuple(ids))
+            users_to_delete = cur.fetchall()
+            
+            teacher_ids = [u[0] for u in users_to_delete if u[1] == 'teacher']
+            student_ids = [u[0] for u in users_to_delete if u[1] == 'student']
+            
+            if teacher_ids:
+                t_format = ','.join(['%s'] * len(teacher_ids))
+                cur.execute(f"UPDATE courses SET teacher_id=NULL WHERE teacher_id IN ({t_format})", tuple(teacher_ids))
+                cur.execute(f"DELETE FROM announcements WHERE author_id IN ({t_format})", tuple(teacher_ids))
+                
+            if student_ids:
+                s_format = ','.join(['%s'] * len(student_ids))
+                cur.execute(f"DELETE FROM enrollments WHERE student_id IN ({s_format})", tuple(student_ids))
+                cur.execute(f"DELETE FROM attendance WHERE student_id IN ({s_format})", tuple(student_ids))
+                cur.execute(f"DELETE FROM quiz_answers WHERE student_id IN ({s_format})", tuple(student_ids))
+                cur.execute(f"DELETE FROM quiz_submissions WHERE student_id IN ({s_format})", tuple(student_ids))
+                cur.execute(f"DELETE FROM submissions WHERE student_id IN ({s_format})", tuple(student_ids))
+                cur.execute(f"DELETE FROM student_fee_payments WHERE student_id IN ({s_format})", tuple(student_ids))
+                
+            cur.execute(f"DELETE FROM discussion_posts WHERE author_id IN ({format_strings})", tuple(ids))
+            cur.execute(f"DELETE FROM users WHERE id IN ({format_strings})", tuple(ids))
+        db.commit()
+        log_audit(user["id"], "Bulk Deleted Users", f"Deleted {len(ids)} users.")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Failed bulk delete: {str(e)}")
+    finally:
+        DB_POOL.putconn(db)
+    return {"ok": True}
+
+@app.post("/api/admin/courses/bulk-delete")
+async def bulk_delete_courses(request: Request, user=Depends(require_role("admin", "super_admin"))):
+    data = await request.json()
+    ids = [int(i) for i in data.get("ids", [])]
+    if not ids: return {"ok": True}
+    
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            format_strings = ','.join(['%s'] * len(ids))
+            cur.execute(f"DELETE FROM enrollments WHERE course_id IN ({format_strings})", tuple(ids))
+            cur.execute(f"DELETE FROM attendance WHERE course_id IN ({format_strings})", tuple(ids))
+            cur.execute(f"DELETE FROM syllabus WHERE course_id IN ({format_strings})", tuple(ids))
+            cur.execute(f"DELETE FROM module_items WHERE module_id IN (SELECT id FROM modules WHERE course_id IN ({format_strings}))", tuple(ids))
+            cur.execute(f"DELETE FROM modules WHERE course_id IN ({format_strings})", tuple(ids))
+            cur.execute(f"DELETE FROM quiz_answers WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id IN ({format_strings}))", tuple(ids))
+            cur.execute(f"DELETE FROM quiz_submissions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id IN ({format_strings}))", tuple(ids))
+            cur.execute(f"DELETE FROM quiz_options WHERE question_id IN (SELECT id FROM quiz_questions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id IN ({format_strings})))", tuple(ids))
+            cur.execute(f"DELETE FROM quiz_questions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id IN ({format_strings}))", tuple(ids))
+            cur.execute(f"DELETE FROM quizzes WHERE course_id IN ({format_strings})", tuple(ids))
+            cur.execute(f"DELETE FROM submissions WHERE assignment_id IN (SELECT id FROM assignments WHERE course_id IN ({format_strings}))", tuple(ids))
+            cur.execute(f"DELETE FROM assignments WHERE course_id IN ({format_strings})", tuple(ids))
+            cur.execute(f"DELETE FROM discussion_posts WHERE discussion_id IN (SELECT id FROM discussions WHERE course_id IN ({format_strings}))", tuple(ids))
+            cur.execute(f"DELETE FROM discussions WHERE course_id IN ({format_strings})", tuple(ids))
+            cur.execute(f"DELETE FROM rubric_criteria WHERE rubric_id IN (SELECT id FROM rubrics WHERE course_id IN ({format_strings}))", tuple(ids))
+            cur.execute(f"DELETE FROM rubrics WHERE course_id IN ({format_strings})", tuple(ids))
+            cur.execute(f"DELETE FROM materials WHERE course_id IN ({format_strings})", tuple(ids))
+            cur.execute(f"DELETE FROM pages WHERE course_id IN ({format_strings})", tuple(ids))
+            cur.execute(f"DELETE FROM announcements WHERE course_id IN ({format_strings})", tuple(ids))
+            cur.execute(f"DELETE FROM calendar_events WHERE course_id IN ({format_strings})", tuple(ids))
+            cur.execute(f"DELETE FROM courses WHERE id IN ({format_strings})", tuple(ids))
+        db.commit()
+        log_audit(user["id"], "Bulk Deleted Courses", f"Deleted {len(ids)} courses.")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Failed bulk delete: {str(e)}")
+    finally:
+        DB_POOL.putconn(db)
+    return {"ok": True}
+
+
+
 @app.get("/api/admin/courses/{cid}/students")
 def course_students(cid: int, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     enrolled = query("""
-        SELECT u.id,u.full_name,u.username,e.enrolled_at
+        SELECT u.id,u.full_name,u.username,e.enrolled_at,u.grade
         FROM enrollments e JOIN users u ON e.student_id=u.id
         WHERE e.course_id=? ORDER BY u.full_name
     """, (cid,))
-    all_students = query("SELECT id,full_name,username FROM users WHERE role='student' ORDER BY full_name")
+    all_students = query("SELECT id,full_name,username,grade FROM users WHERE role='student' ORDER BY full_name")
     enrolled_ids = {s["id"] for s in enrolled}
     available = [s for s in all_students if s["id"] not in enrolled_ids]
     return {"enrolled": enrolled, "available": available}
@@ -2131,16 +2249,19 @@ async def create_calendar_event(
 
     eid = execute("INSERT INTO calendar_events(title, description, start_date, end_date, has_time, event_date, event_type, course_id, user_id) VALUES(?,?,?,?,?,?,?,?,?)",
                   (title, description, start_date, end_date, has_time, start_date, event_type, course_id, user["id"]))
+                  
+    log_audit(user["id"], "Created Calendar Event", f"Title: {title} | Type: {event_type.upper()}")
     return {"id": eid, "message": "Event created"}
 
 @app.delete("/api/calendar/events/{eid}")
 def delete_calendar_event(eid: int, user=Depends(require_user)):
-    event = query("SELECT user_id FROM calendar_events WHERE id=?", (eid,), one=True)
+    event = query("SELECT user_id, title FROM calendar_events WHERE id=?", (eid,), one=True)
     if event and (event["user_id"] == user["id"] or user["role"] == "admin"):
         execute("DELETE FROM calendar_events WHERE id=?", (eid,))
+        
+        log_audit(user["id"], "Deleted Calendar Event", f"Title: {event['title']}")
         return {"ok": True}
     raise HTTPException(403, "Not authorized to delete this event")
-
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -2214,6 +2335,8 @@ def fix_database():
     results = []
     try:
         with db.cursor() as cur:
+            # Add grade to courses
+            cur.execute("ALTER TABLE courses ADD COLUMN IF NOT EXISTS grade TEXT;")
             # ---- Missing user columns ----
             columns = [
                 ("users", "dob",              "TEXT"),
@@ -2266,8 +2389,15 @@ def fix_database():
             # Add expiry column to existing broadcast table
             cur.execute("ALTER TABLE broadcast_alerts ADD COLUMN IF NOT EXISTS expires_at TEXT;")
 
-            
+            cur.execute("ALTER TABLE broadcast_alerts DROP CONSTRAINT IF EXISTS broadcast_alerts_target_audience_check;")
 
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS class_details (
+                    grade TEXT PRIMARY KEY,
+                    teacher_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+                );
+            """)
 
         
             ## ---- HYBRID FEE MANAGEMENT TABLES ----
@@ -2530,6 +2660,43 @@ async def bulk_enroll(cid: int, request: Request, user=Depends(require_role("adm
     log_audit(user["id"], "Bulk Enrolled Students", f"Course: {course['name']} | Total Enrolled: {len(data.get('student_ids', []))}")
     return {"ok": True}
 
+
+@app.get("/api/admin/classes/{grade_name:path}/details")
+def get_class_details(grade_name: str, user=Depends(require_role("admin", "super_admin", "sub_admin"))):
+    details = query("SELECT teacher_id FROM class_details WHERE grade=?", (grade_name,), one=True)
+    if details and details["teacher_id"]:
+        teacher = query("SELECT full_name FROM users WHERE id=?", (details["teacher_id"],), one=True)
+        return {"teacher_id": details["teacher_id"], "teacher_name": teacher["full_name"] if teacher else "Unknown"}
+    return {"teacher_id": None, "teacher_name": "Unassigned"}
+
+@app.post("/api/admin/classes/{grade_name:path}/teacher")
+def set_class_teacher(grade_name: str, teacher_id: int = Form(...), user=Depends(require_role("admin", "super_admin"))):
+    execute("""
+        INSERT INTO class_details(grade, teacher_id) VALUES(?,?)
+        ON CONFLICT(grade) DO UPDATE SET teacher_id=EXCLUDED.teacher_id
+        RETURNING grade
+    """, (grade_name, teacher_id))
+    
+    teacher = query("SELECT full_name FROM users WHERE id=?", (teacher_id,), one=True)
+    log_audit(user["id"], "Assigned Class Teacher", f"Grade: {grade_name} | Teacher: {teacher['full_name']}")
+    return {"ok": True}
+
+@app.post("/api/admin/classes/{grade_name:path}/enroll")
+def enroll_class_in_course(grade_name: str, course_id: int = Form(...), user=Depends(require_role("admin", "sub_admin", "super_admin"))):
+    students = query("SELECT id FROM users WHERE role='student' AND grade=?", (grade_name,))
+    count = 0
+    for s in students:
+        try: 
+            execute("INSERT INTO enrollments(student_id,course_id) VALUES(?,?)", (s["id"], course_id))
+            count += 1
+        except IntegrityError: 
+            pass # Skips students who are already enrolled in the course
+    
+    course = query("SELECT name FROM courses WHERE id=?", (course_id,), one=True)
+    log_audit(user["id"], "Class Bulk Enrolled", f"Class: {grade_name} | Course: {course['name']} | Enrolled: {count} new students")
+    return {"ok": True, "enrolled_count": count}
+
+
 @app.post("/api/admin/courses/{cid}/unenroll/bulk")
 async def bulk_unenroll(cid: int, request: Request, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     data = await request.json()
@@ -2550,44 +2717,79 @@ def get_my_fees(user=Depends(require_role("student"))):
 
 
 
-# 1. Replace the POST route
 @app.post("/api/admin/broadcasts")
 def create_broadcast(title: str = Form(...), message: str = Form(...), target: str = Form("all"), hours: int = Form(24), user=Depends(require_role("admin", "super_admin"))):
     execute("UPDATE broadcast_alerts SET is_active = FALSE")
+    expires_at = (datetime.now() + timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    execute("INSERT INTO broadcast_alerts(title, message, target_audience, created_by, expires_at) VALUES(?,?,?,?,?)", 
+            (title, message, target, user["id"], expires_at))
+            
+    log_audit(user["id"], "Created Broadcast", f"Target: {target.upper()} | Title: {title}")
+    return {"ok": True}
+
+@app.post("/api/admin/broadcasts/specific")
+async def create_specific_broadcast(request: Request, user=Depends(require_role("admin", "super_admin"))):
+    data = await request.json()
+    title = data.get("title")
+    message = data.get("message")
+    student_ids = data.get("student_ids", [])
     
-    # Calculate expiry time based on the hours provided
-    # Change this line inside create_broadcast
-    expires_at = (datetime.utcnow() + timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    if not student_ids: return {"ok": True}
+        
+    expires_at = (datetime.now() + timedelta(hours=72)).strftime("%Y-%m-%d %H:%M:%S")
+    target = "SPECIFIC:" + ",".join(map(str, student_ids))
+    
+    db = get_db()
+    try:
+        db.cursor().execute("ALTER TABLE broadcast_alerts DROP CONSTRAINT IF EXISTS broadcast_alerts_target_audience_check;")
+        db.commit()
+    except:
+        db.rollback()
+    finally:
+        DB_POOL.putconn(db)
     
     execute("INSERT INTO broadcast_alerts(title, message, target_audience, created_by, expires_at) VALUES(?,?,?,?,?)", 
             (title, message, target, user["id"], expires_at))
+            
+    log_audit(user["id"], "Sent Specific Reminders", f"Sent to {len(student_ids)} student(s) | Title: {title}")
     return {"ok": True}
 
-# 2. Replace the GET route
 @app.get("/api/broadcasts/active")
 def get_active_broadcast(user=Depends(require_user)):
     role_target = 'students' if user['role'] == 'student' else 'teachers' if user['role'] == 'teacher' else 'all'
     
-    # Now selects the ID and checks if current time is past expires_at
-    return query("""
+    alerts = query("""
         SELECT id, title, message, target_audience 
         FROM broadcast_alerts 
         WHERE is_active = TRUE 
-          AND (target_audience = 'all' OR target_audience = ?)
           AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP::text)
-        ORDER BY created_at DESC LIMIT 1
-    """, (role_target,), one=True)
-
-
-
-
-@app.delete("/api/admin/broadcasts/active")
-def clear_active_broadcast(user=Depends(require_role("admin", "super_admin"))):
-    # Instantly turn off all active broadcasts
-    execute("UPDATE broadcast_alerts SET is_active = FALSE")
+        ORDER BY created_at DESC
+    """)
     
-    # Optional: Log the action
-    log_audit(user["id"], "Cleared Broadcast Alert", "Manually deactivated active alerts.")
+    for alert in alerts:
+        target = alert["target_audience"]
+        if target in ('all', role_target):
+            return alert
+        if target.startswith("SPECIFIC:"):
+            # Check if this specific user was targeted
+            ids = target.replace("SPECIFIC:", "").split(",")
+            if str(user["id"]) in ids:
+                return alert
+    return None
+
+# --- NEW ADMIN ALERT MANAGEMENT ROUTES ---
+@app.get("/api/admin/broadcasts")
+def get_all_admin_broadcasts(user=Depends(require_role("admin", "super_admin"))):
+    """Fetches all active alerts for the new Admin Manager Modal"""
+    return query("SELECT * FROM broadcast_alerts WHERE is_active = TRUE ORDER BY created_at DESC")
+
+@app.delete("/api/admin/broadcasts/{alert_id}")
+def delete_specific_broadcast(alert_id: int, user=Depends(require_role("admin", "super_admin"))):
+    """Deletes a specific alert instead of clearing all of them"""
+    execute("UPDATE broadcast_alerts SET is_active = FALSE WHERE id=?", (alert_id,))
+    
+    # Also force the frontend UI overlay to hide immediately
+    execute("DELETE FROM broadcast_alerts WHERE id=?", (alert_id,))
     return {"ok": True}
 # ---------------------------------------------------------------------------
 

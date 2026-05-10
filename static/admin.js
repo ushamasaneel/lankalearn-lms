@@ -29,8 +29,7 @@ async function loadAdminDashboard() {
         <p>Welcome back, ${escHtml(currentUser.full_name)}. Here's an overview of LankaLearn.</p>
       </div>
       <div class="flex gap-8">
-        <button class="btn btn-secondary" onclick="clearActiveBroadcast()">🛑 Clear Alert</button>
-        <button class="btn btn-danger" onclick="showBroadcastModal()">🚨 Send School Alert</button>
+        <button class="btn btn-primary" style="background:#dc2626;" onclick="manageAlertsModal()">📢 Manage Alerts</button>
       </div>
     </div>
 
@@ -379,7 +378,7 @@ async function loadAuditLogs() {
 }
 
 // ================================================================
-// USERS SECTION
+// USERS SECTION (With Bulk Select & Filters)
 // ================================================================
 
 async function loadAdminUsers(activeTab) {
@@ -401,11 +400,20 @@ async function loadAdminUsers(activeTab) {
 
   function teacherTable(list) {
     if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
-    return `<table><thead><tr><th>Profile</th><th>Details</th><th>Actions</th></tr></thead><tbody>
+    return `
+      <div class="bulk-toolbar" id="teacherBulkBar" style="display:none; justify-content:space-between; background:#fee2e2; border:1px solid #fca5a5; padding:10px 16px; border-radius:8px; margin-bottom:12px;">
+        <div><strong id="teacherSelCount">0</strong> selected</div>
+        <button class="btn btn-danger btn-sm" onclick="bulkDeleteUsers('teacher')">🗑️ Delete Selected</button>
+      </div>
+      <div class="table-wrapper"><table><thead><tr>
+        <th style="width:40px"><input type="checkbox" onchange="toggleSelectAll('teacher', this.checked)"></th>
+        <th>Profile</th><th>Details</th><th>Actions</th>
+      </tr></thead><tbody>
       ${list.map(u => {
         const isYou = u.id === currentUser.id;
-        return `<tr>
-          <td><strong>${escHtml(u.full_name)}</strong><br><code>${escHtml(u.username)}</code></td>
+        return `<tr class="user-row-teacher">
+          <td>${!isYou ? `<input type="checkbox" class="chk-teacher" value="${u.id}" onchange="updateBulkBar('teacher')">` : ''}</td>
+          <td><strong>${escHtml(u.full_name)}</strong><br><code class="row-username">${escHtml(u.username)}</code></td>
           <td>${escHtml(u.phone || '—')}</td>
           <td>
             <div class="flex gap-8 flex-center">
@@ -413,37 +421,44 @@ async function loadAdminUsers(activeTab) {
                 <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'teacher')">Edit</button>
                 <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${u.id})" title="Print Profile">🖨️ Profile</button>
                 <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')">Reset PW</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
               `}
             </div>
           </td>
         </tr>`}).join('')}
-    </tbody></table>`;
+    </tbody></table></div>`;
   }
 
   function studentTable(list) {
     if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
-    return `<table><thead><tr><th>Profile</th><th>Grade</th><th>Actions</th></tr></thead><tbody>
-      ${list.map(u => `<tr>
-        <td><strong>${escHtml(u.full_name)}</strong><br><code>${escHtml(u.username)}</code></td>
+    return `
+      <div class="bulk-toolbar" id="studentBulkBar" style="display:none; justify-content:space-between; background:#fee2e2; border:1px solid #fca5a5; padding:10px 16px; border-radius:8px; margin-bottom:12px;">
+        <div><strong id="studentSelCount">0</strong> selected</div>
+        <button class="btn btn-danger btn-sm" onclick="bulkDeleteUsers('student')">🗑️ Delete Selected</button>
+      </div>
+      <div class="table-wrapper"><table><thead><tr>
+        <th style="width:40px"><input type="checkbox" onchange="toggleSelectAll('student', this.checked)"></th>
+        <th>Profile</th><th>Grade</th><th>Actions</th>
+      </tr></thead><tbody>
+      ${list.map(u => `
+      <tr class="user-row-student" data-grade="${escHtml(u.grade || '')}">
+        <td><input type="checkbox" class="chk-student" value="${u.id}" onchange="updateBulkBar('student')"></td>
+        <td><strong>${escHtml(u.full_name)}</strong><br><code class="row-username">${escHtml(u.username)}</code></td>
         <td><span class="grade-pill">${escHtml(u.grade || '—')}</span></td>
         <td>
           <div class="flex gap-8 flex-center">
             <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'student')">Edit</button>
             <button class="btn btn-success btn-sm" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="window.openPaymentPortal(${u.id},'${escHtml(u.full_name)}')">💰 Fees</button>
-            <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${u.id})" title="Print Profile">🖨️ Profile</button>
-            <button class="btn btn-secondary btn-sm" onclick="window.printTermReportCard(${u.id}, '${escHtml(u.full_name)}')">📄 Report</button>
+            <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${u.id})" title="Print Profile">🖨️</button>
             <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')">Reset PW</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
           </div>
         </td>
       </tr>`).join('')}
-    </tbody></table>`;
+    </tbody></table></div>`;
   }
 
   function adminTable(list, roleLabel) {
     if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
-    return `<table><thead><tr><th>Name</th><th>Role</th><th>Actions</th></tr></thead><tbody>
+    return `<div class="table-wrapper"><table><thead><tr><th>Name</th><th>Role</th><th>Actions</th></tr></thead><tbody>
       ${list.map(u => {
         const isYou = u.id === currentUser.id;
         return `<tr>
@@ -453,15 +468,16 @@ async function loadAdminUsers(activeTab) {
             <div class="flex gap-8 flex-center">
               ${isYou ? '<span class="text-muted">You</span>' : `
                 <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'${roleLabel}')">Edit</button>
-                <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${u.id})" title="Print Profile">🖨️ Profile</button>
                 <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')">Reset PW</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${escHtml(u.full_name)}')">Delete</button>
               `}
             </div>
           </td>
         </tr>`}).join('')}
-    </tbody></table>`;
+    </tbody></table></div>`;
   }
+
+  const gradeFilterOptions = GRADE_OPTIONS.map(g => `<option value="${g.value}">${g.label === '— Select Grade (or leave blank) —' ? 'All Grades' : g.label}</option>`).join('');
 
   setContent(`
     <div class="page-header page-header-row">
@@ -477,19 +493,24 @@ async function loadAdminUsers(activeTab) {
     </div>
 
     <div id="tab-teachers" class="tab-panel card" style="display:none">
-      <div class="card-header" style="background:#fafafa;display:flex;align-items:center;gap:10px;">
-        <input type="text" class="search-box" placeholder="🔍 Search teachers…" oninput="filterTeachersSearch()">
-        <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showCreateUser('teacher')">+ Create Teacher</button>
+      <div class="card-header" style="background:#fafafa;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <input type="text" class="search-box" id="search-teacher" placeholder="🔍 Search teachers…" oninput="filterUserTable('teacher')">
+        <div style="flex:1"></div>
+        <button class="btn btn-primary btn-sm" onclick="showCreateUser('teacher')">+ Create Teacher</button>
       </div>
-      <div class="card-body" style="padding:0">${teacherTable(teachers)}</div>
+      <div class="card-body" style="padding:16px">${teacherTable(teachers)}</div>
     </div>
 
     <div id="tab-students" class="tab-panel card" style="display:none">
-      <div class="card-header" style="background:#fafafa;display:flex;align-items:center;gap:10px;">
-        <input type="text" class="search-box" placeholder="🔍 Search students…" oninput="filterStudentsSearch()">
-        <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showCreateUser('student')">+ Create Student</button>
+      <div class="card-header" style="background:#fafafa;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <input type="text" class="search-box" id="search-student" placeholder="🔍 Search students…" oninput="filterUserTable('student')">
+        <select class="form-control" id="filter-grade-student" style="width:160px; padding:7px 14px;" onchange="filterUserTable('student')">
+            ${gradeFilterOptions}
+        </select>
+        <div style="flex:1"></div>
+        <button class="btn btn-primary btn-sm" onclick="showCreateUser('student')">+ Create Student</button>
       </div>
-      <div class="card-body" style="padding:0">${studentTable(students)}</div>
+      <div class="card-body" style="padding:16px">${studentTable(students)}</div>
     </div>
 
     <div id="tab-classes" class="tab-panel card" style="display:none">
@@ -505,7 +526,7 @@ async function loadAdminUsers(activeTab) {
         <h3 style="margin:0; font-size:16px;">Office Staff</h3>
         <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showCreateUser('sub_admin')">+ Create Staff</button>
       </div>
-      <div class="card-body" style="padding:0">${adminTable(subAdmins, 'sub_admin')}</div>
+      <div class="card-body" style="padding:16px">${adminTable(subAdmins, 'sub_admin')}</div>
     </div>
 
     <div id="tab-admins" class="tab-panel card" style="display:none">
@@ -513,40 +534,23 @@ async function loadAdminUsers(activeTab) {
         <h3 style="margin:0; font-size:16px;">Admins</h3>
         <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showCreateUser('admin')">+ Create Admin</button>
       </div>
-      <div class="card-body" style="padding:0">${adminTable(admins, 'admin')}</div>
+      <div class="card-body" style="padding:16px">${adminTable(admins, 'admin')}</div>
     </div>
   `);
 
+  // Classes grouping
   const classGroups = {};
   students.forEach(s => {
     const g = s.grade || 'Unassigned';
     if (!classGroups[g]) classGroups[g] = [];
     classGroups[g].push(s);
   });
-
   const sortedGrades = Object.keys(classGroups).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-
   const classDirEl = document.getElementById('classDirectoryBody');
   if (classDirEl) {
-    classDirEl.innerHTML = `
-      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; padding: 10px;">
-        ${sortedGrades.map(grade => `
-          <div class="card" style="cursor:pointer; border:1.5px solid var(--border); transition: all 0.2s;" 
-               onclick="window.execShowGradeStudents('${escHtml(grade)}')"
-               onmouseover="this.style.transform='translateY(-3px)'; this.style.borderColor='var(--primary)';"
-               onmouseout="this.style.transform='none'; this.style.borderColor='var(--border)';">
-            <div style="padding:20px; text-align:center;">
-              <div style="font-size:24px; margin-bottom:8px;">🏫</div>
-              <div style="font-weight:700; color:var(--primary-dark); font-size:15px;">${escHtml(grade)}</div>
-              <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">${classGroups[grade].length} Students Enrolled</div>
-            </div>
-            <div style="background:var(--primary-light); padding:8px; text-align:center; font-size:11px; font-weight:700; color:var(--primary);">
-              VIEW CLASS LIST
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    `;
+    classDirEl.innerHTML = `<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; padding: 10px;">
+        ${sortedGrades.map(grade => `<div class="card" style="cursor:pointer; border:1.5px solid var(--border); transition: all 0.2s;" onclick="window.execShowGradeStudents('${escHtml(grade)}')" onmouseover="this.style.transform='translateY(-3px)'; this.style.borderColor='var(--primary)';" onmouseout="this.style.transform='none'; this.style.borderColor='var(--border)';"><div style="padding:20px; text-align:center;"><div style="font-size:24px; margin-bottom:8px;">🏫</div><div style="font-weight:700; color:var(--primary-dark); font-size:15px;">${escHtml(grade)}</div><div style="font-size:12px; color:var(--text-muted); margin-top:4px;">${classGroups[grade].length} Students Enrolled</div></div><div style="background:var(--primary-light); padding:8px; text-align:center; font-size:11px; font-weight:700; color:var(--primary);">VIEW CLASS LIST</div></div>`).join('')}
+      </div>`;
   }
 
   const tabToShow = document.getElementById(activeTab) ? activeTab : 'tab-teachers';
@@ -554,30 +558,74 @@ async function loadAdminUsers(activeTab) {
   if (btnToActivate) switchTab(btnToActivate, tabToShow);
 }
 
-function roleToTab(role) { return { teacher: 'tab-teachers', student: 'tab-students', sub_admin: 'tab-subadmins', admin: 'tab-admins', super_admin: 'tab-admins' }[role] || 'tab-teachers'; }
+// Bulk Selection and Filter Helpers
+window.toggleSelectAll = (role, checked) => {
+    document.querySelectorAll(`.chk-${role}`).forEach(cb => {
+        if(cb.closest('tr').style.display !== 'none') cb.checked = checked;
+    });
+    updateBulkBar(role);
+};
+
+window.updateBulkBar = (role) => {
+    const count = document.querySelectorAll(`.chk-${role}:checked`).length;
+    const bar = document.getElementById(`${role}BulkBar`);
+    if(bar) {
+        bar.style.display = count > 0 ? 'flex' : 'none';
+        document.getElementById(`${role}SelCount`).textContent = count;
+    }
+};
+
+window.bulkDeleteUsers = async (role) => {
+    const checked = Array.from(document.querySelectorAll(`.chk-${role}:checked`)).map(cb => cb.value);
+    if (!confirm(`Are you sure you want to completely delete ${checked.length} ${role}(s)? All their data will be wiped.`)) return;
+    try {
+        await apiJSON('/api/admin/users/bulk-delete', { ids: checked });
+        showToast(`Successfully deleted ${checked.length} ${role}(s)`, 'success');
+        loadAdminUsers('tab-' + role + 's');
+    } catch(e) { showToast(e.message, 'error'); }
+};
+
+window.filterUserTable = (role) => {
+    const q = document.getElementById(`search-${role}`)?.value.toLowerCase() || '';
+    const g = document.getElementById(`filter-grade-${role}`)?.value || '';
+    
+    document.querySelectorAll(`.user-row-${role}`).forEach(row => {
+        const text = row.textContent.toLowerCase();
+        const grade = row.dataset.grade || '';
+        const matchQ = !q || text.includes(q);
+        const matchG = !g || grade === g;
+        
+        if (matchQ && matchG) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+            const cb = row.querySelector(`.chk-${role}`);
+            if(cb) cb.checked = false; // Uncheck hidden rows
+        }
+    });
+    updateBulkBar(role);
+};
+
+
+function roleToTab(role) { 
+    return { teacher: 'tab-teachers', student: 'tab-students', sub_admin: 'tab-subadmins', admin: 'tab-admins', super_admin: 'tab-admins' }[role] || 'tab-teachers'; 
+}
+
 function switchTab(btn, tabId) {
-  btn.closest('.tabs').parentElement.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  // Remove 'active' class from all buttons
+  btn.closest('.tabs').querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  // Hide all tab panels
   document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+  // Activate clicked button and show its panel
   btn.classList.add('active');
   document.getElementById(tabId).style.display = 'block';
 }
 
-function filterTeachersSearch() {
-  const q = (document.querySelector('#tab-teachers .search-box')?.value || '').toLowerCase();
-  document.querySelectorAll('#tab-teachers tbody tr').forEach(row => { row.style.display = (!q || row.textContent.toLowerCase().includes(q)) ? '' : 'none'; });
+async function deleteUser(id, name) {
+  if (!confirm(`Delete user "${name}"? This cannot be undone.`)) return;
+  const cur = document.querySelector('.tab-panel[style*="display: block"], .tab-panel.active:not([style*="display: none"])');
+  try { await apiDelete(`/api/admin/users/${id}`); showToast('User deleted', 'success'); loadAdminUsers(cur ? cur.id : 'tab-teachers'); } catch (e) { showToast(e.message, 'error'); }
 }
-
-function filterStudentsSearch() {
-  const q = (document.querySelector('#tab-students .search-box')?.value || '').toLowerCase();
-  document.querySelectorAll('#tab-students tbody tr').forEach(row => { row.style.display = (!q || row.textContent.toLowerCase().includes(q)) ? '' : 'none'; });
-}
-
-const GRADE_OPTIONS = [
-  { value: '', label: '— Select Grade —' },
-  { value: 'Grade 6', label: 'Grade 6' }, { value: 'Grade 7', label: 'Grade 7' }, { value: 'Grade 8', label: 'Grade 8' },
-  { value: 'Grade 9', label: 'Grade 9' }, { value: 'Grade 10', label: 'Grade 10' }, { value: 'Grade 11 (O/L)', label: 'Grade 11 (O/L)' },
-  { value: 'Grade 12 (A/L)', label: 'Grade 12 (A/L)' }, { value: 'Grade 13 (A/L)', label: 'Grade 13 (A/L)' },
-];
 
 function showCreateUser(role) {
   const roleTitle = role.charAt(0).toUpperCase() + role.slice(1);
@@ -595,7 +643,7 @@ function showCreateUser(role) {
     { label: 'Additional Notes', name: 'notes', type: 'textarea' },
     { label: 'Profile Image', name: 'file', type: 'file' }
   ], async (fd) => {
-    try { await apiPost('/api/admin/users', fd); closeModal(); showToast(`${roleTitle} created successfully`, 'success'); loadAdminUsers(roleToTab(role));
+    try { await apiPost('/api/admin/users', fd); closeModal(); showToast(`${roleTitle} created successfully`, 'success'); loadAdminUsers('tab-' + role + 's');
     } catch (e) { showToast(e.message, 'error'); }
   }, `Create ${roleTitle}`));
   if (role === 'student') { api('/api/admin/next-admission').then(res => { const field = document.querySelector('[name="admission_number"]'); if (field && !field.value) field.value = res.admission_number; }).catch(() => {}); }
@@ -617,19 +665,13 @@ function showEditUser(id, roleLabel) {
     ...gradeField, ...admissionField,
     { label: 'Update Profile Image', name: 'file', type: 'file' }
   ], async (fd) => {
-    try { await api(`/api/admin/users/${id}`, { method: 'PUT', body: fd }); closeModal(); showToast('User updated!', 'success'); loadAdminUsers(roleToTab(roleLabel));
+    try { await api(`/api/admin/users/${id}`, { method: 'PUT', body: fd }); closeModal(); showToast('User updated!', 'success'); loadAdminUsers('tab-' + roleLabel + 's');
     } catch (e) { showToast(e.message, 'error'); }
   }, 'Save Changes'));
 }
 
-async function deleteUser(id, name) {
-  if (!confirm(`Delete user "${name}"? This cannot be undone.`)) return;
-  const cur = document.querySelector('.tab-panel[style*="display: block"], .tab-panel.active:not([style*="display: none"])');
-  try { await apiDelete(`/api/admin/users/${id}`); showToast('User deleted', 'success'); loadAdminUsers(cur ? cur.id : 'tab-teachers'); } catch (e) { showToast(e.message, 'error'); }
-}
-
 // ================================================================
-// COURSES SECTION
+// COURSES SECTION (With Filters & Bulk Delete)
 // ================================================================
 
 async function loadAdminCourses() {
@@ -638,24 +680,52 @@ async function loadAdminCourses() {
   setContent('<div class="loading-state"><div class="spinner"></div></div>');
 
   const [courses, teachers] = await Promise.all([api('/api/admin/courses'), api('/api/admin/teachers')]);
-  window._adminCourses = courses; window._adminTeachers = teachers;
+  window._adminCourses = courses; 
+  window._adminTeachers = teachers;
+
+  const gradeFilterOptions = GRADE_OPTIONS.map(g => `<option value="${g.value}">${g.label === '— Select Grade (or leave blank) —' ? 'All Grades' : g.label}</option>`).join('');
 
   setContent(`
-    <div class="page-header page-header-row"><div><h1>📚 Courses</h1><p>Create and manage all courses</p></div><button class="btn btn-primary" onclick="showCreateCourse()">+ Create Course</button></div>
-    <div class="course-grid">
+    <div class="page-header page-header-row">
+        <div><h1>📚 Courses</h1><p>Create and manage all courses</p></div>
+        <button class="btn btn-primary" onclick="showCreateCourse()">+ Create Course</button>
+    </div>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:16px;">
+        <div style="display:flex; gap:10px; align-items:center; background:white; padding:8px 12px; border-radius:8px; border:1px solid var(--border);">
+            <input type="checkbox" onchange="toggleSelectAllCourses(this.checked)" style="transform:scale(1.2); cursor:pointer;" title="Select All Visible">
+            <span style="font-size:13px; font-weight:600;">Select All</span>
+        </div>
+        <div style="display:flex; gap:10px;">
+            <select class="form-control" id="courseGradeFilter" onchange="filterCourses()" style="width:180px; padding:7px 14px;">
+                ${gradeFilterOptions}
+            </select>
+            <input type="text" class="search-box" id="courseSearch" placeholder="🔍 Search courses..." oninput="filterCourses()">
+        </div>
+    </div>
+
+    <div class="bulk-toolbar" id="courseBulkBar" style="display:none; justify-content:space-between; background:#fee2e2; border:1px solid #fca5a5; padding:10px 16px; border-radius:8px; margin-bottom:20px;">
+        <div><strong id="courseSelCount">0</strong> courses selected</div>
+        <button class="btn btn-danger btn-sm" onclick="bulkDeleteCourses()">🗑️ Delete Selected Courses</button>
+    </div>
+
+    <div class="course-grid" id="adminCourseGrid">
       ${courses.map((c, i) => `
-        <div class="course-card">
+        <div class="course-card course-item-card" data-grade="${escHtml(c.grade || '')}" style="position:relative;">
+          <input type="checkbox" class="chk-course" value="${c.id}" onchange="updateCourseBulkBar()" style="position:absolute; top:12px; right:12px; z-index:10; transform:scale(1.4); cursor:pointer;">
           <div class="course-card-banner ${courseBannerClass(c.id)}"></div>
           <div class="course-card-body">
-            <div class="course-card-code">${escHtml(c.code)}</div>
+            <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:4px;">
+                <div class="course-card-code">${escHtml(c.code)}</div>
+                ${c.grade ? `<span class="badge badge-gray" style="font-size:9px;">${escHtml(c.grade)}</span>` : ''}
+            </div>
             <div class="course-card-name">${escHtml(c.name)}</div>
             <div class="course-card-desc">${escHtml(c.description||'No description')}</div>
             <div class="course-card-footer">
               <div class="course-card-teacher">👨‍🏫 ${escHtml(c.teacher_name||'Unassigned')}</div>
               <div class="flex gap-8">
-                <button class="btn btn-secondary btn-sm" onclick="manageEnrollments(${c.id},'${escHtml(c.name)}')">Students</button>
+                <button class="btn btn-secondary btn-sm" onclick="manageEnrollments(${c.id},'${escHtml(c.name)}')">👥</button>
                 <button class="btn btn-secondary btn-sm" onclick="showEditCourse(${c.id})">Edit</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteCourse(${c.id},'${escHtml(c.name)}')">Delete</button>
               </div>
             </div>
           </div>
@@ -665,16 +735,64 @@ async function loadAdminCourses() {
   `);
 }
 
+window.toggleSelectAllCourses = (checked) => {
+    document.querySelectorAll('.chk-course').forEach(cb => {
+        if(cb.closest('.course-item-card').style.display !== 'none') cb.checked = checked;
+    });
+    updateCourseBulkBar();
+};
+
+window.updateCourseBulkBar = () => {
+    const count = document.querySelectorAll('.chk-course:checked').length;
+    const bar = document.getElementById('courseBulkBar');
+    if(bar) {
+        bar.style.display = count > 0 ? 'flex' : 'none';
+        document.getElementById('courseSelCount').textContent = count;
+    }
+};
+
+window.filterCourses = () => {
+    const q = document.getElementById('courseSearch').value.toLowerCase();
+    const g = document.getElementById('courseGradeFilter').value;
+    
+    document.querySelectorAll('.course-item-card').forEach(card => {
+        const text = card.textContent.toLowerCase();
+        const grade = card.dataset.grade || '';
+        const matchQ = !q || text.includes(q);
+        const matchG = !g || grade === g;
+        
+        if (matchQ && matchG) {
+            card.style.display = '';
+        } else {
+            card.style.display = 'none';
+            const cb = card.querySelector('.chk-course');
+            if(cb) cb.checked = false; 
+        }
+    });
+    updateCourseBulkBar();
+};
+
+window.bulkDeleteCourses = async () => {
+    const checked = Array.from(document.querySelectorAll('.chk-course:checked')).map(cb => cb.value);
+    if (!confirm(`Are you sure you want to delete ${checked.length} course(s)? ALL assignments, quizzes, and enrollments inside them will be destroyed!`)) return;
+    try {
+        await apiJSON('/api/admin/courses/bulk-delete', { ids: checked });
+        showToast(`Successfully deleted ${checked.length} course(s)`, 'success');
+        loadAdminCourses();
+    } catch(e) { showToast(e.message, 'error'); }
+};
+
 function showEditCourse(id) {
   const c = window._adminCourses.find(x => x.id === id);
   const teachers = window._adminTeachers || [];
   openModal('Edit Course', modalForm([
     { label: 'Course Code', name: 'code', value: c.code, required: true },
     { label: 'Course Name', name: 'name', value: c.name, required: true },
+    { label: 'Target Grade (Optional)', name: 'grade', type: 'select', value: c.grade || '', options: GRADE_OPTIONS },
     { label: 'Description', name: 'description', type: 'textarea', value: c.description || '' },
+    { label: 'Teacher', name: 'teacher_id', type: 'select', value: c.teacher_id, required: true, options: teachers.map(t => ({ value: t.id, label: t.full_name })) },
     { label: 'Start Date', name: 'start_date', type: 'date', value: c.start_date || '', required: true },
     { label: 'End Date', name: 'end_date', type: 'date', value: c.end_date || '', required: true },
-    { label: 'Teacher', name: 'teacher_id', type: 'select', value: c.teacher_id, required: true, options: teachers.map(t => ({ value: t.id, label: t.full_name })) },
   ], async (fd) => {
     try { await api(`/api/admin/courses/${id}`, { method: 'PUT', body: fd }); closeModal(); showToast('Course updated!', 'success'); loadAdminCourses();
     } catch (e) { showToast(e.message, 'error'); }
@@ -684,12 +802,13 @@ function showEditCourse(id) {
 function showCreateCourse() {
   const teachers = window._adminTeachers || [];
   openModal('Create New Course', modalForm([
-    { label: 'Course Code', name: 'code', placeholder: 'e.g. OL-MATH-11', required: true },
-    { label: 'Course Name', name: 'name', placeholder: 'e.g. O/L Mathematics', required: true },
+    { label: 'Course Code', name: 'code', placeholder: 'e.g. SCI-10', required: true },
+    { label: 'Course Name', name: 'name', placeholder: 'e.g. Grade 10 Science', required: true },
+    { label: 'Target Grade (Optional)', name: 'grade', type: 'select', options: GRADE_OPTIONS },
     { label: 'Description', name: 'description', type: 'textarea' },
+    { label: 'Teacher', name: 'teacher_id', type: 'select', required: true, options: teachers.map(t => ({ value: t.id, label: t.full_name })) },
     { label: 'Start Date', name: 'start_date', type: 'date', required: true },
     { label: 'End Date', name: 'end_date', type: 'date', required: true },
-    { label: 'Teacher', name: 'teacher_id', type: 'select', required: true, options: teachers.map(t => ({ value: t.id, label: t.full_name })) },
   ], async (fd) => {
     try { await apiPost('/api/admin/courses', fd); closeModal(); showToast('Course created!', 'success'); loadAdminCourses();
     } catch (e) { showToast(e.message, 'error'); }
@@ -703,30 +822,83 @@ async function deleteCourse(id, name) {
 
 async function manageEnrollments(courseId, courseName) {
   const data = await api(`/api/admin/courses/${courseId}/students`);
+  const gradeFilterOptions = GRADE_OPTIONS.map(g => `<option value="${g.value}">${g.label === '— Select Grade (or leave blank) —' ? 'All Grades' : g.label}</option>`).join('');
+
   let html = `
     <div style="display:flex; gap:20px; align-items:flex-start;">
       <div style="flex:1; border:1px solid var(--border); border-radius:8px; padding:16px; background:#fafafa;">
         <div style="display:flex; justify-content:space-between; margin-bottom:12px;"><h4 style="margin:0">Enrolled (${data.enrolled.length})</h4><button class="btn btn-danger btn-xs" onclick="bulkUnenroll(${courseId})">Remove Selected</button></div>
         <div style="max-height:300px; overflow-y:auto; border:1px solid #e2e8f0; background:white;">
-          <table style="width:100%; font-size:13px;"><thead style="position:sticky; top:0; background:#f8fafc; z-index:1;"><tr><th style="padding:8px"><input type="checkbox" onchange="document.querySelectorAll('.unenroll-chk').forEach(c => c.checked = this.checked)"></th><th style="padding:8px">Student</th></tr></thead>
-          <tbody>${data.enrolled.map(s => `<tr><td style="padding:8px; border-bottom:1px solid #eee;"><input type="checkbox" class="unenroll-chk" value="${s.id}"></td><td style="padding:8px; border-bottom:1px solid #eee;">${escHtml(s.full_name)} <span class="text-muted">(${s.username})</span></td></tr>`).join('')}</tbody></table>
+          <table style="width:100%; font-size:13px;">
+            <thead style="position:sticky; top:0; background:#f8fafc; z-index:1;">
+              <tr>
+                <th style="padding:8px"><input type="checkbox" onchange="toggleSelectAllUnenrollStudents(this.checked)"></th>
+                <th style="padding:8px">Student</th>
+              </tr>
+            </thead>
+            <tbody>${data.enrolled.map(s => `<tr><td style="padding:8px; border-bottom:1px solid #eee;"><input type="checkbox" class="unenroll-chk" value="${s.id}"></td><td style="padding:8px; border-bottom:1px solid #eee;">${escHtml(s.full_name)} <br><span class="text-muted text-sm">${escHtml(s.grade || 'No Grade')}</span></td></tr>`).join('')}</tbody>
+          </table>
         </div>
       </div>
       <div style="flex:1; border:1px solid var(--border); border-radius:8px; padding:16px; background:#fafafa;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;"><h4 style="margin:0">Add Students</h4><button class="btn btn-primary btn-xs" onclick="bulkEnroll(${courseId})">+ Enroll Selected</button></div>
-        <input type="text" id="addStudentSearch" class="form-control mb-8" style="padding:6px; font-size:12px;" placeholder="Search name..." oninput="filterAddStudents()">
+        <div style="display:flex; gap:8px; margin-bottom:8px;">
+          <select id="addStudentGradeFilter" class="form-control" style="padding:6px; font-size:12px;" onchange="filterAddStudents()">
+            ${gradeFilterOptions}
+          </select>
+          <input type="text" id="addStudentSearch" class="form-control" style="padding:6px; font-size:12px; flex:1;" placeholder="Search name..." oninput="filterAddStudents()">
+        </div>
         <div style="max-height:265px; overflow-y:auto; border:1px solid #e2e8f0; background:white;">
-          <table style="width:100%; font-size:13px;" id="addStudentsTable"><thead style="position:sticky; top:0; background:#f8fafc; z-index:1;"><tr><th style="padding:8px"><input type="checkbox" onchange="document.querySelectorAll('.enroll-chk:not([style*=\\'display: none\\'])').forEach(c => c.checked = this.checked)"></th><th style="padding:8px">Available</th></tr></thead>
-          <tbody>${data.available.map(s => `<tr><td style="padding:8px; border-bottom:1px solid #eee;"><input type="checkbox" class="enroll-chk" value="${s.id}"></td><td style="padding:8px; border-bottom:1px solid #eee;" class="stu-name">${escHtml(s.full_name)}</td></tr>`).join('')}</tbody></table>
+          <table style="width:100%; font-size:13px;" id="addStudentsTable">
+            <thead style="position:sticky; top:0; background:#f8fafc; z-index:1;">
+              <tr>
+                <th style="padding:8px"><input type="checkbox" onchange="toggleSelectAllAddStudents(this.checked)"></th>
+                <th style="padding:8px">Available</th>
+              </tr>
+            </thead>
+            <tbody>${data.available.map(s => `<tr data-grade="${escHtml(s.grade || '')}"><td style="padding:8px; border-bottom:1px solid #eee;"><input type="checkbox" class="enroll-chk" value="${s.id}"></td><td style="padding:8px; border-bottom:1px solid #eee;" class="stu-name">${escHtml(s.full_name)} <br><span class="text-muted text-sm">${escHtml(s.grade || 'No Grade')}</span></td></tr>`).join('')}</tbody>
+          </table>
         </div>
       </div>
     </div>`;
-  window.filterAddStudents = () => { const q = document.getElementById('addStudentSearch').value.toLowerCase(); document.querySelectorAll('#addStudentsTable tbody tr').forEach(row => { row.style.display = row.querySelector('.stu-name').textContent.toLowerCase().includes(q) ? '' : 'none'; if(row.style.display === 'none') row.querySelector('.enroll-chk').checked = false; }); };
+    
+  window.filterAddStudents = () => { 
+    const q = document.getElementById('addStudentSearch').value.toLowerCase(); 
+    const g = document.getElementById('addStudentGradeFilter').value;
+    document.querySelectorAll('#addStudentsTable tbody tr').forEach(row => { 
+      const name = row.querySelector('.stu-name').textContent.toLowerCase(); 
+      const grade = row.dataset.grade || '';
+      if ((!q || name.includes(q)) && (!g || grade === g)) {
+          row.style.display = '';
+      } else {
+          row.style.display = 'none';
+          const cb = row.querySelector('.enroll-chk');
+          if (cb) cb.checked = false; // Instantly uncheck if hidden
+      }
+    }); 
+  };
+
+  // Safely selects ONLY the checkboxes inside rows that are currently visible
+  window.toggleSelectAllAddStudents = (checked) => {
+      document.querySelectorAll('#addStudentsTable tbody tr').forEach(row => {
+          if (row.style.display !== 'none') {
+              const cb = row.querySelector('.enroll-chk');
+              if (cb) cb.checked = checked;
+          }
+      });
+  };
+
+  window.toggleSelectAllUnenrollStudents = (checked) => {
+      document.querySelectorAll('.unenroll-chk').forEach(cb => {
+          if (cb.closest('tr').style.display !== 'none') cb.checked = checked;
+      });
+  };
+
   window.bulkEnroll = async (cid) => { const ids = Array.from(document.querySelectorAll('.enroll-chk:checked')).map(c => parseInt(c.value)); if(!ids.length) return; await apiJSON(`/api/admin/courses/${cid}/enroll/bulk`, { student_ids: ids }); manageEnrollments(cid, courseName); };
   window.bulkUnenroll = async (cid) => { const ids = Array.from(document.querySelectorAll('.unenroll-chk:checked')).map(c => parseInt(c.value)); if(!ids.length) return; await apiJSON(`/api/admin/courses/${cid}/unenroll/bulk`, { student_ids: ids }); manageEnrollments(cid, courseName); };
+  
   openModal(`Students — ${courseName}`, html, 'modal-box-lg');
 }
-
 // ================================================================
 // HYBRID DIRECT PAYMENT FEES
 // ================================================================
@@ -1193,23 +1365,63 @@ window.showBroadcastModal = () => {
   }, 'Send Alert'));
 };
 
-window.clearActiveBroadcast = async () => {
-  if (!confirm("Are you sure you want to remove the active alert for all users?")) return;
-  
-  try {
-    await apiDelete('/api/admin/broadcasts/active');
-    
-    const firstElement = document.body.firstElementChild;
-    if (firstElement && firstElement.innerHTML.includes('🚨')) {
-        firstElement.style.display = 'none';
-        document.querySelector('.top-header').style.top = '0px';
-        document.querySelector('.sidebar').style.top = '64px';
+window.manageAlertsModal = async () => {
+    openModal('Manage Active Alerts', '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
+    try {
+        const alerts = await api('/api/admin/broadcasts');
+        let html = `
+            <button class="btn btn-primary w-full mb-16" onclick="showBroadcastModal()">+ Create New General Alert</button>
+            <div class="table-wrapper">
+                <table style="width:100%; font-size:13px; border-collapse:collapse;">
+                    <thead><tr style="background:#f8fafc; border-bottom:2px solid var(--border);">
+                        <th style="padding:10px;text-align:left;">Title & Message</th>
+                        <th style="padding:10px;text-align:left;">Audience</th>
+                        <th style="padding:10px;text-align:left;">Expires</th>
+                        <th style="padding:10px;text-align:right;">Action</th>
+                    </tr></thead>
+                    <tbody>
+        `;
+        
+        if (!alerts.length) {
+            html += `<tr><td colspan="4" class="text-center text-muted" style="padding:20px;">No active alerts running.</td></tr>`;
+        } else {
+            alerts.forEach(a => {
+                const isSpecific = a.target_audience.startsWith('SPECIFIC:');
+                const targetLabel = isSpecific 
+                    ? `<span class="badge badge-purple">Targeted (${a.target_audience.split(',').length} users)</span>` 
+                    : `<span class="badge badge-blue">${a.target_audience.toUpperCase()}</span>`;
+                
+                html += `<tr>
+                    <td style="padding:10px; border-bottom:1px solid #f1f5f9;"><strong>${escHtml(a.title)}</strong><br><span class="text-muted text-sm">${escHtml(a.message).substring(0, 50)}...</span></td>
+                    <td style="padding:10px; border-bottom:1px solid #f1f5f9;">${targetLabel}</td>
+                    <td style="padding:10px; border-bottom:1px solid #f1f5f9;">${a.expires_at ? a.expires_at.split(' ')[0] : 'Never'}</td>
+                    <td style="padding:10px; border-bottom:1px solid #f1f5f9; text-align:right;"><button class="btn btn-danger btn-xs" onclick="deleteSpecificAlert(${a.id})">🛑 Stop</button></td>
+                </tr>`;
+            });
+        }
+        html += `</tbody></table></div>`;
+        document.getElementById('modalBody').innerHTML = html;
+    } catch (e) {
+        document.getElementById('modalBody').innerHTML = `<div class="alert alert-error">${e.message}</div>`;
     }
-    
-    showToast('Active alert cleared successfully!', 'success');
-  } catch (e) {
-    showToast(e.message, 'error');
-  }
+};
+
+window.deleteSpecificAlert = async (id) => {
+    if(!confirm("Stop and remove this alert?")) return;
+    try {
+        await apiDelete(`/api/admin/broadcasts/${id}`);
+        showToast("Alert stopped successfully", "success");
+        
+        // Ensure the red banner hides immediately if it's currently on the admin's screen
+        const firstElement = document.body.firstElementChild;
+        if (firstElement && firstElement.innerHTML.includes('🚨')) {
+            firstElement.style.display = 'none';
+            document.querySelector('.top-header').style.top = '0px';
+            document.querySelector('.sidebar').style.top = '64px';
+        }
+        
+        manageAlertsModal(); // Reload the modal to show it disappeared
+    } catch (e) { showToast(e.message, 'error'); }
 };
 
 
@@ -1222,24 +1434,41 @@ window.clearActiveBroadcast = async () => {
 // ================================================================
 
 window.execShowGradeStudents = async (gradeName) => {
-    openModal(`Students in ${gradeName}`, '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
+    openModal(`Class Overview: ${gradeName}`, '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
     try {
-        const users = await api('/api/admin/users');
+        const [users, classDetails] = await Promise.all([
+            api('/api/admin/users'),
+            api(`/api/admin/classes/${encodeURIComponent(gradeName)}/details`).catch(() => ({ teacher_name: 'Unassigned' }))
+        ]);
         const students = users.filter(u => u.role === 'student' && (u.grade === gradeName || (gradeName === 'Unassigned' && !u.grade)));
         
-        // Add the new Top Bar with Search and Print All buttons
         let html = `
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding:10px; background:#f8fafc; border-radius:8px; border:1px solid var(--border);">
-            <div style="display:flex; align-items:center; gap:8px; flex:1;">
-                <span style="font-size:16px;">🔍</span>
-                <input type="text" id="classStudentSearch" class="form-control" placeholder="Search name or admission number..." style="max-width:300px; margin:0;" oninput="filterClassStudents()">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; gap:16px; flex-wrap:wrap;">
+            
+            <div style="background:#eff6ff; border:1px solid #bfdbfe; padding:16px; border-radius:8px; flex:1; min-width:250px;">
+                <div style="font-size:11px; text-transform:uppercase; font-weight:700; color:#1e40af; margin-bottom:4px;">Class Teacher</div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div style="font-size:16px; font-weight:700; color:#1e3a8a;">👨‍🏫 ${escHtml(classDetails.teacher_name)}</div>
+                    <button class="btn btn-secondary btn-xs" onclick="window.assignClassTeacher('${escHtml(gradeName)}')">Change</button>
+                </div>
             </div>
-            <button class="btn btn-primary" onclick="window.printClassReportCards('${escHtml(gradeName)}')">🖨️ Print All Reports</button>
+
+            <div style="background:#f8fafc; border:1px solid var(--border); padding:16px; border-radius:8px; flex:1; min-width:250px;">
+                <div style="font-size:11px; text-transform:uppercase; font-weight:700; color:var(--text-muted); margin-bottom:8px;">Class Operations</div>
+                <div class="flex gap-8">
+                    <button class="btn btn-primary btn-sm w-full" onclick="window.assignCourseToClass('${escHtml(gradeName)}')">📚 Assign Course to Class</button>
+                    <button class="btn btn-secondary btn-sm" onclick="window.printClassReportCards('${escHtml(gradeName)}')">🖨️ Print Reports</button>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-bottom:12px;">
+            <input type="text" id="classStudentSearch" class="form-control" placeholder="🔍 Search student name or admission number..." oninput="filterClassStudents()">
         </div>
         
-        <div class="table-wrapper">
+        <div class="table-wrapper" style="max-height:400px; overflow-y:auto;">
             <table id="classStudentsTable" style="width:100%; font-size:13.5px; border-collapse:collapse;">
-                <thead>
+                <thead style="position:sticky; top:0; z-index:2;">
                     <tr style="background:#f8fafc; border-bottom:2px solid var(--border);">
                         <th style="padding:12px 16px;text-align:left;">Name</th>
                         <th style="padding:12px 16px;text-align:left;">Adm No.</th>
@@ -1262,9 +1491,9 @@ window.execShowGradeStudents = async (gradeName) => {
                     </td>
                     <td style="padding:14px 16px; border-bottom:1px solid #f1f5f9; text-align:center;">
                         <div class="flex gap-8 flex-center" style="justify-content:center;">
-                            <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${s.id})">👤 Profile</button>
-                            <button class="btn btn-success btn-sm" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="window.openPaymentPortal(${s.id}, '${escHtml(s.full_name)}')">💰 Fees</button>
-                            <button class="btn btn-secondary btn-sm" onclick="window.printTermReportCard(${s.id}, '${escHtml(s.full_name)}')">📄 Report</button>
+                            <button class="btn btn-secondary btn-xs" onclick="window.printUserProfile(${s.id})">👤 Profile</button>
+                            <button class="btn btn-success btn-xs" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="window.openPaymentPortal(${s.id}, '${escHtml(s.full_name)}')">💰 Fees</button>
+                            <button class="btn btn-secondary btn-xs" onclick="window.printTermReportCard(${s.id}, '${escHtml(s.full_name)}')">📄 Report</button>
                         </div>
                     </td>
                 </tr>`;
@@ -1274,22 +1503,71 @@ window.execShowGradeStudents = async (gradeName) => {
         html += `</tbody></table></div>`;
         document.getElementById('modalBody').innerHTML = html;
 
-        // Make the search logic available globally to filter rows
         window.filterClassStudents = () => {
             const q = document.getElementById('classStudentSearch').value.toLowerCase();
             document.querySelectorAll('.class-student-row').forEach(row => {
                 const name = row.querySelector('.cs-name')?.textContent.toLowerCase() || '';
                 const adm = row.querySelector('.cs-adm')?.textContent.toLowerCase() || '';
-                if (name.includes(q) || adm.includes(q)) {
-                    row.style.display = '';
-                } else {
-                    row.style.display = 'none';
-                }
+                row.style.display = (name.includes(q) || adm.includes(q)) ? '' : 'none';
             });
         };
 
     } catch (e) { document.getElementById('modalBody').innerHTML = `<div class="alert alert-error">Error: ${e.message}</div>`; }
 };
+
+window.assignClassTeacher = async (gradeName) => {
+    const teachers = window._adminUsers ? window._adminUsers.filter(u => u.role === 'teacher') : await api('/api/admin/teachers');
+    
+    openModal(`Assign Class Teacher: ${gradeName}`, modalForm([
+        { label: 'Select Teacher', name: 'teacher_id', type: 'select', required: true, 
+          options: teachers.map(t => ({ value: t.id, label: t.full_name })) }
+    ], async (fd) => {
+        try {
+            await apiPost(`/api/admin/classes/${encodeURIComponent(gradeName)}/teacher`, fd);
+            showToast('Class Teacher assigned!', 'success');
+            execShowGradeStudents(gradeName); // Reload the modal to show the new teacher
+        } catch (e) { showToast(e.message, 'error'); }
+    }, 'Assign Teacher'));
+};
+
+window.assignCourseToClass = async (gradeName) => {
+    const courses = window._adminCourses ? window._adminCourses : await api('/api/admin/courses');
+    
+    openModal(`Bulk Enroll: ${gradeName}`, `
+        <div class="alert alert-warn mb-16">This will immediately enroll every student currently in <strong>${escHtml(gradeName)}</strong> into the selected course.</div>
+        <form id="bulkCourseForm" onsubmit="return false">
+            <div class="form-group">
+                <label>Select Subject/Course</label>
+                <select name="course_id" class="form-control" required>
+                    ${courses.map(c => `<option value="${c.id}">${escHtml(c.name)} (${escHtml(c.code)})</option>`).join('')}
+                </select>
+            </div>
+            <div class="flex gap-8 mt-16" style="justify-content:flex-end">
+                <button type="button" class="btn btn-secondary" onclick="execShowGradeStudents('${escHtml(gradeName)}')">Back</button>
+                <button type="submit" class="btn btn-primary" onclick="submitBulkCourse('${escHtml(gradeName)}')">Assign Course</button>
+            </div>
+        </form>
+    `);
+
+    window.submitBulkCourse = async (gName) => {
+        const form = document.getElementById('bulkCourseForm');
+        if (!form.checkValidity()) { form.reportValidity(); return; }
+        const fd = new FormData(form);
+        const btn = form.querySelector('.btn-primary');
+        btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:6px"></div> Enrolling...';
+        btn.disabled = true;
+
+        try {
+            const res = await apiPost(`/api/admin/classes/${encodeURIComponent(gName)}/enroll`, fd);
+            showToast(`Success! ${res.enrolled_count} students enrolled.`, 'success');
+            execShowGradeStudents(gName); // Return to class overview
+        } catch (e) { 
+            showToast(e.message, 'error'); 
+            btn.innerHTML = 'Assign Course'; btn.disabled = false;
+        }
+    };
+};
+
 
 window.printClassReportCards = async (gradeName) => {
     // Visual feedback so the user knows the system is working
@@ -1406,4 +1684,384 @@ window.printClassReportCards = async (gradeName) => {
         btn.innerHTML = originalText;
         btn.disabled = false;
     }
+};
+
+
+// ================================================================
+// MISSING CONSTANTS & UTILS
+// ================================================================
+
+const GRADE_OPTIONS = [
+  { value: '', label: '— Select Grade (or leave blank) —' },
+  { value: 'Grade 5', label: 'Grade 5' }, { value: 'Grade 6', label: 'Grade 6' }, 
+  { value: 'Grade 7', label: 'Grade 7' }, { value: 'Grade 8', label: 'Grade 8' },
+  { value: 'Grade 9', label: 'Grade 9' }, { value: 'Grade 10', label: 'Grade 10' }, 
+  { value: 'Grade 11 (O/L)', label: 'Grade 11 (O/L)' },
+  { value: 'Grade 12 (A/L)', label: 'Grade 12 (A/L)' }, { value: 'Grade 13 (A/L)', label: 'Grade 13 (A/L)' },
+];
+
+function roleBadge(role) {
+  if (role === 'admin' || role === 'super_admin') return 'badge-red';
+  if (role === 'sub_admin') return 'badge-blue';
+  if (role === 'teacher') return 'badge-purple';
+  return 'badge-blue'; 
+}
+
+async function resetUserPassword(uid, name) {
+    if (!confirm(`Reset password for ${name}? This will generate a new temporary password.`)) return;
+    try {
+        const res = await apiPost(`/api/admin/users/${uid}/reset-password`);
+        openModal('Password Reset Successful', `
+            <div class="alert alert-success">
+                <strong>Temporary Password for ${escHtml(name)}:</strong><br>
+                <code style="font-size:24px; display:block; margin:10px 0;">${res.temp_password}</code>
+                Please copy this and give it to the user. They will be forced to change it upon login.
+            </div>
+            <button class="btn btn-primary w-full" onclick="closeModal()">Done</button>
+        `);
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+window.showBroadcastModal = () => {
+  openModal('Send School-Wide Alert', modalForm([
+    { label: 'Alert Title', name: 'title', placeholder: 'e.g. Unexpected School Closure', required: true },
+    { label: 'Message', name: 'message', type: 'textarea', placeholder: 'Details of the announcement...', required: true },
+    { label: 'Target Audience', name: 'target', type: 'select', options: [
+        {value: 'all', label: 'Everyone'},
+        {value: 'students', label: 'Students Only'},
+        {value: 'teachers', label: 'Teachers Only'}
+    ]},
+    { label: 'Expires In (Hours)', name: 'hours', type: 'number', value: '24', required: true }
+  ], async (fd) => {
+    try {
+      await apiPost('/api/admin/broadcasts', fd);
+      closeModal();
+      showToast('Broadcast sent!', 'success');
+      setTimeout(() => window.location.reload(), 1000);
+    } catch (e) { showToast(e.message, 'error'); }
+  }, 'Send Alert'));
+};
+
+window.clearActiveBroadcast = async () => {
+  if (!confirm("Are you sure you want to remove the active alert for all users?")) return;
+  try {
+    await apiDelete('/api/admin/broadcasts/active');
+    const firstElement = document.body.firstElementChild;
+    if (firstElement && firstElement.innerHTML.includes('🚨')) {
+        firstElement.style.display = 'none';
+        document.querySelector('.top-header').style.top = '0px';
+        document.querySelector('.sidebar').style.top = '64px';
+    }
+    showToast('Active alert cleared successfully!', 'success');
+  } catch (e) { showToast(e.message, 'error'); }
+};
+
+// ================================================================
+// FEE MANAGEMENT & PRINTING
+// ================================================================
+
+// ================================================================
+// FEE MANAGEMENT & PRINTING
+// ================================================================
+
+async function loadAdminFees() {
+  setPageTitle('Fee Management');
+  setActiveSidebar('fees');
+  setContent('<div class="loading-state"><div class="spinner"></div></div>');
+  
+  const [users, gradeFees, allPayments] = await Promise.all([
+    api('/api/admin/users'),
+    api('/api/admin/grade-fees'),
+    api('/api/admin/all-fee-payments')
+  ]);
+  
+  const students = users.filter(u => u.role === 'student');
+  window._currentGradeFees = gradeFees; 
+  window._allFeePayments = allPayments;
+  window._arrearsMonths = []; // Initialize empty filter list
+  
+  const gradeOptionsHtml = GRADE_OPTIONS.map(g => 
+      `<option value="${g.value}">${g.label === '— Select Grade (or leave blank) —' ? 'All Grades' : g.label}</option>`
+  ).join('');
+  
+  setContent(`
+    <div class="page-header page-header-row">
+      <div style="display:flex; justify-content:space-between; width:100%;">
+        <div><h1>💰 Fee Portal</h1><p>Record payments, set grade fees, and track arrears.</p></div>
+      </div>
+    </div>
+
+    <div class="card mb-24">
+      <div class="card-header" style="cursor:pointer; background:#fafafa;" onclick="document.getElementById('masterFeesBody').style.display = document.getElementById('masterFeesBody').style.display === 'none' ? 'block' : 'none'">
+        <span class="card-title">⚙️ Master Grade Fees (Click to Expand/Collapse)</span>
+      </div>
+      <div class="card-body" id="masterFeesBody" style="display:none;">
+        <table style="width:100%; font-size:13px; margin-bottom:16px;">
+          <thead><tr>
+            <th style="text-align:left; padding-bottom:8px;">Grade</th>
+            <th style="text-align:right; padding-bottom:8px;">Monthly Tuition (LKR)</th>
+            <th style="text-align:right; padding-bottom:8px;">Action</th>
+          </tr></thead>
+          <tbody>
+            ${gradeFees.map(f => `<tr>
+              <td style="padding:6px 0; border-top:1px solid #eee;"><strong>${escHtml(f.grade_name)}</strong></td>
+              <td style="text-align:right; padding:6px 0; border-top:1px solid #eee;">${f.monthly_tuition.toLocaleString()}</td>
+              <td style="text-align:right; padding:6px 0; border-top:1px solid #eee;">
+                <button class="btn btn-secondary btn-xs" onclick="editMasterFee('${escHtml(f.grade_name)}', ${f.monthly_tuition})">Edit</button>
+                <button class="btn btn-danger btn-xs" onclick="deleteMasterFee('${escHtml(f.grade_name)}')">✕</button>
+              </td>
+            </tr>`).join('')}
+            ${!gradeFees.length ? '<tr><td colspan="3" class="text-muted text-center" style="padding:10px;">No master fees set.</td></tr>' : ''}
+          </tbody>
+        </table>
+        
+        <div style="display:flex; gap:8px; align-items:center; background:#f8fafc; padding:12px; border-radius:8px; border:1px solid var(--border);">
+          <select id="newGradeName" class="form-control" onchange="autoFillMasterFee(this.value)">
+             ${gradeOptionsHtml}
+          </select>
+          <input type="number" id="newGradeFee" class="form-control" placeholder="Amount (LKR)">
+          <button class="btn btn-primary" onclick="saveMasterGradeFee()">Save Fee</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:16px; align-items:flex-end; margin-bottom:16px; flex-wrap:wrap; background:#f8fafc; padding:16px; border:1px solid var(--border); border-radius:8px;">
+        <div class="form-group" style="margin:0;">
+            <label>Filter by Grade</label>
+            <select id="feeGradeFilter" class="form-control" onchange="filterFeeStudents()">
+                ${gradeOptionsHtml}
+            </select>
+        </div>
+        <div class="form-group" style="margin:0;">
+            <label>Check Arrears For Month</label>
+            <div style="display:flex; gap:8px;">
+                <input type="month" id="arrearsMonthPicker" class="form-control">
+                <button class="btn btn-secondary" onclick="addArrearsMonth()">Add Filter</button>
+            </div>
+        </div>
+        <div style="flex:1;">
+            <label style="font-size:12px; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Searching for Students Missing:</label>
+            <div id="selectedArrearsMonths" style="display:flex; gap:8px; flex-wrap:wrap; min-height:36px; align-items:center;">
+                <span class="text-muted text-sm">No months selected (Showing all students)</span>
+            </div>
+        </div>
+        <button class="btn btn-warning" onclick="sendFeeReminders()">🔔 Send Reminders to Filtered</button>
+    </div>
+
+    <div class="card">
+      <div class="card-header" style="background:#fafafa;">
+        <span class="card-title">Student Payment Directory</span>
+        <input type="text" id="feeStudentSearch" class="search-box" style="float:right;" placeholder="🔍 Search student..." oninput="filterFeeStudents()">
+      </div>
+      <div class="table-wrapper">
+        <table id="feeStudentsTable">
+          <thead><tr><th>Student</th><th>Admission No.</th><th>Grade</th><th>Actions</th></tr></thead>
+          <tbody>
+            ${students.map(s => `
+              <tr data-sid="${s.id}" data-grade="${escHtml(s.grade || '')}">
+                <td class="student-info"><strong>${escHtml(s.full_name)}</strong><br><code class="text-muted">${escHtml(s.username)}</code></td>
+                <td>${s.admission_number ? `<code class="adm-number">${escHtml(s.admission_number)}</code>` : '—'}</td>
+                <td><span class="grade-pill">${escHtml(s.grade || 'Unassigned')}</span></td>
+                <td><button class="btn btn-success btn-sm" onclick="window.openPaymentPortal(${s.id},'${escHtml(s.full_name)}')">Open Portal</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `);
+  
+  window.addArrearsMonth = () => {
+      const val = document.getElementById('arrearsMonthPicker').value;
+      if(!val || window._arrearsMonths.includes(val)) return;
+      window._arrearsMonths.push(val);
+      renderArrearsMonths();
+      filterFeeStudents();
+  };
+
+  window.removeArrearsMonth = (val) => {
+      window._arrearsMonths = window._arrearsMonths.filter(m => m !== val);
+      renderArrearsMonths();
+      filterFeeStudents();
+  };
+
+  window.renderArrearsMonths = () => {
+      const container = document.getElementById('selectedArrearsMonths');
+      if(window._arrearsMonths.length === 0) {
+          container.innerHTML = '<span class="text-muted text-sm">No months selected (Showing all students)</span>';
+          return;
+      }
+      container.innerHTML = window._arrearsMonths.map(m => `
+          <span class="badge badge-red" style="display:inline-flex; align-items:center; gap:6px; font-size:12px; padding:6px 12px;">
+              ${m} <span style="cursor:pointer; font-size:16px; margin-left:4px;" onclick="removeArrearsMonth('${m}')">✕</span>
+          </span>
+      `).join('');
+  };
+
+  window.filterFeeStudents = () => {
+    const q = document.getElementById('feeStudentSearch').value.toLowerCase();
+    const g = document.getElementById('feeGradeFilter').value;
+    
+    document.querySelectorAll('#feeStudentsTable tbody tr').forEach(row => {
+      const text = row.querySelector('.student-info').textContent.toLowerCase();
+      const grade = row.dataset.grade || '';
+      const sid = parseInt(row.dataset.sid);
+      
+      let show = true;
+      if (q && !text.includes(q)) show = false;
+      if (g && grade !== g) show = false;
+      
+      // If arrears months are selected, check if student is missing ANY of those months
+      if (show && window._arrearsMonths.length > 0) {
+          const studentPayments = window._allFeePayments.filter(p => p.student_id === sid).map(p => p.fee_month);
+          const isMissingAnyRequestedMonth = window._arrearsMonths.some(m => !studentPayments.includes(m));
+          if (!isMissingAnyRequestedMonth) show = false; // They paid all requested months, hide them!
+      }
+      
+      row.style.display = show ? '' : 'none';
+    });
+  };
+
+  window.sendFeeReminders = async () => {
+      const visibleRows = Array.from(document.querySelectorAll('#feeStudentsTable tbody tr')).filter(r => r.style.display !== 'none');
+      const studentIds = visibleRows.map(r => parseInt(r.dataset.sid));
+      
+      if(studentIds.length === 0) {
+          showToast("No students currently match the filter.", "error");
+          return;
+      }
+      
+      openModal('Send Gentle Fee Reminder', modalForm([
+          { label: 'Alert Title', name: 'title', value: 'Fee Payment Reminder', required: true },
+          { label: 'Message', name: 'message', type: 'textarea', value: 'This is a gentle reminder that your tuition fees are currently overdue based on our records. Please arrange payment with the office as soon as possible. Thank you!', required: true }
+      ], async (fd) => {
+          const payload = {
+              title: fd.get('title'),
+              message: fd.get('message'),
+              student_ids: studentIds
+          };
+          
+          try {
+              const btn = document.querySelector('#modalBox .btn-primary');
+              btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:6px"></div> Sending...';
+              btn.disabled = true;
+              
+              await apiJSON('/api/admin/broadcasts/specific', payload);
+              closeModal();
+              showToast(`Reminders sent directly to ${studentIds.length} student(s)!`, 'success');
+          } catch(e) { showToast(e.message, 'error'); }
+      }, 'Send Reminders'));
+  };
+}
+
+window.editMasterFee = (gradeName, amount) => {
+    document.getElementById('newGradeName').value = gradeName;
+    document.getElementById('newGradeFee').value = amount;
+    document.getElementById('newGradeFee').focus();
+};
+
+window.autoFillMasterFee = (gradeName) => {
+    const feeRecord = window._currentGradeFees.find(f => f.grade_name === gradeName);
+    document.getElementById('newGradeFee').value = feeRecord ? feeRecord.monthly_tuition : '';
+};
+
+window.saveMasterGradeFee = async () => {
+  const grade = document.getElementById('newGradeName').value;
+  const amount = document.getElementById('newGradeFee').value;
+  if(!grade || !amount) return showToast("Select a grade and enter an amount", "error");
+  
+  const fd = new FormData(); 
+  fd.append('grade_name', grade); 
+  fd.append('monthly_tuition', amount);
+  
+  try {
+      await apiPost('/api/admin/grade-fees', fd); 
+      showToast("Fee updated!", "success"); 
+      loadAdminFees();
+  } catch(e) { showToast(e.message, "error"); }
+};
+
+window.deleteMasterFee = async (gradeName) => {
+    if (!confirm(`Are you sure you want to delete the master fee for ${gradeName}?`)) return;
+    try {
+        await apiDelete(`/api/admin/grade-fees/${encodeURIComponent(gradeName)}`);
+        showToast("Master fee deleted", "success");
+        loadAdminFees();
+    } catch (e) { showToast(e.message, "error"); }
+};
+
+window.openPaymentPortal = async (sid, name) => {
+    openModal(`Payment Portal — ${name}`, '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
+    const data = await api(`/api/admin/students/${sid}/fees`);
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const today = new Date().toISOString().split('T')[0];
+    
+    const autoAmount = data.master_fee > 0 ? data.master_fee : '';
+    
+    let html = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <div><strong>Grade:</strong> <span class="grade-pill">${escHtml(data.student.grade || 'Unassigned')}</span></div>
+      <div><strong>Standard Monthly Fee:</strong> <span class="badge badge-blue">LKR ${data.master_fee.toLocaleString()}</span></div>
+    </div>
+
+    <div style="background:#f8fafc; border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:24px;">
+      <h4 style="margin-top:0; margin-bottom:12px;">Record New Payment</h4>
+      <div class="form-row form-row-2">
+        <div class="form-group">
+          <label>Payment Type</label>
+          <select id="payType" class="form-control" onchange="togglePayFields(${data.master_fee})">
+            <option value="monthly">Monthly Tuition</option>
+            <option value="extra">Other / Extra Fee</option>
+          </select>
+        </div>
+        <div class="form-group" id="payMonthWrap">
+          <label>Which Month?</label>
+          <input type="month" id="payMonth" class="form-control" value="${currentMonth}">
+        </div>
+        <div class="form-group" id="payDescWrap" style="display:none;">
+          <label>Description</label>
+          <input type="text" id="payDesc" class="form-control" placeholder="e.g. Exam Fee, Uniform">
+        </div>
+      </div>
+      <div class="form-row form-row-3">
+        <div class="form-group">
+          <label>Amount (LKR)</label>
+          <input type="number" id="payAmount" class="form-control" value="${autoAmount}" required>
+        </div>
+        <div class="form-group"><label>Date</label><input type="date" id="payDate" class="form-control" value="${today}"></div>
+        <div class="form-group"><label>Receipt #</label><input type="text" id="payReceipt" class="form-control" placeholder="Optional"></div>
+      </div>
+      <button class="btn btn-primary w-full" onclick="processDirectPayment(${sid})">Submit Payment</button>
+    </div>
+
+    <h4>Payment History</h4>
+    <table style="width:100%; font-size:13px; border-collapse:collapse;">
+        <thead><tr style="background:#f8fafc; border-bottom:2px solid #ddd;">
+            <th style="padding:8px;text-align:left;">Date</th>
+            <th style="padding:8px;text-align:left;">Fee Month / For</th>
+            <th style="padding:8px;text-align:left;">Details</th>
+            <th style="padding:8px;text-align:right;">Amount</th>
+            <th style="padding:8px;text-align:center;">Action</th>
+        </tr></thead>
+        <tbody>`;
+        
+    data.payments.forEach(p => {
+        // Explicitly format the new Fee Month column
+        const monthFor = p.payment_type === 'monthly' ? `<span class="badge badge-blue" style="font-size:12px;">📅 ${p.fee_month}</span>` : `<span class="badge badge-purple" style="font-size:12px;">🏷️ ${escHtml(p.payment_for)}</span>`;
+        
+        html += `<tr>
+            <td style="padding:8px;border-bottom:1px solid #eee;">${p.paid_date}</td>
+            <td style="padding:8px;border-bottom:1px solid #eee;font-weight:600;">${monthFor}</td>
+            <td style="padding:8px;border-bottom:1px solid #eee;"><span class="text-muted text-sm">Type: ${p.payment_type.toUpperCase()}<br>Cashier: ${escHtml(p.recorded_by_name || 'Admin')}</span></td>
+            <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;"><strong>LKR ${p.amount.toLocaleString()}</strong></td>
+            <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">
+                <button class="btn btn-secondary btn-xs" onclick="window.printPaymentReceipt(${p.id}, ${sid})" title="Print Receipt">🖨️</button>
+                <button class="btn btn-danger btn-xs" onclick="deletePayment(${p.id}, ${sid})">✕</button>
+            </td>
+        </tr>`;
+    });
+    if(!data.payments.length) html += '<tr><td colspan="5" class="text-muted text-center" style="padding:20px;">No payments recorded for this student.</td></tr>';
+    html += `</tbody></table>`;
+    
+    document.getElementById('modalBody').innerHTML = html;
 };
