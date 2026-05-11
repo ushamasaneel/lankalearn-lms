@@ -118,33 +118,33 @@ function buildSidebar() {
     nav.innerHTML = `
       <div class="sidebar-heading">Administration</div>
       <div class="sidebar-item" id="si-dash" onclick="loadAdminDashboard(); setActiveSidebar('dash')">
-        <span class="si-icon">🏠</span> Dashboard
+        <i class="fas fa-chart-line si-icon"></i> Dashboard
       </div>
       <div class="sidebar-item" id="si-users" onclick="loadAdminUsers(); setActiveSidebar('users')">
-        <span class="si-icon">👥</span> Users
+        <i class="fas fa-users si-icon"></i> Users
       </div>
       <div class="sidebar-item" id="si-courses" onclick="loadAdminCourses(); setActiveSidebar('courses')">
-        <span class="si-icon">📚</span> Courses
+        <i class="fas fa-book si-icon"></i> Courses
       </div>
       <div class="sidebar-item" id="si-fees" onclick="loadAdminFees(); setActiveSidebar('fees')">
-        <span class="si-icon">💰</span> Fees
+        <i class="fas fa-money-bill-wave si-icon"></i> Fees
       </div>
       <div class="sidebar-divider"></div>
       <div class="sidebar-heading">System</div>
       <div class="sidebar-item" id="si-cal" onclick="loadCalendar(); setActiveSidebar('cal')">
-        <span class="si-icon">📅</span> Calendar
+        <i class="fas fa-calendar-alt si-icon"></i> Calendar
       </div>
       <div class="sidebar-item" id="si-logs" onclick="loadAuditLogs(); setActiveSidebar('logs')">
-        <span class="si-icon">🛡️</span> Audit Logs
+        <i class="fas fa-shield-alt si-icon"></i> Audit Logs
       </div>
       <div class="sidebar-item" id="si-trash" onclick="loadTrashBin(); setActiveSidebar('trash')">
-        <span class="si-icon">🗑️</span> Trash Bin
+        <i class="fas fa-trash-alt si-icon"></i> Trash Bin
       </div>
       <div class="sidebar-item" id="si-exec" onclick="loadExecutiveDashboard(); setActiveSidebar('exec')">
-         <span class="si-icon">📈</span> Executive Dash
+         <i class="fas fa-briefcase si-icon"></i> Executive Dash
       </div>
       <div class="sidebar-item" id="si-help" onclick="loadFAQ(); setActiveSidebar('help')">
-        <span class="si-icon">❓</span> Help & Support
+        <i class="fas fa-question-circle si-icon"></i> Help & Support
       </div>
     `;
   } else if (currentUser.role === 'teacher') {
@@ -172,6 +172,9 @@ function buildSidebar() {
       </div>
       <div class="sidebar-item" id="si-scal" onclick="loadCalendar(); setActiveSidebar('scal')">
         <span class="si-icon">📅</span> Calendar
+      </div>
+      <div class="sidebar-item" id="si-stimetable" onclick="loadStudentTimetable(); setActiveSidebar('stimetable')">
+        <span class="si-icon">⏰</span> Class Timetable
       </div>
       <div class="sidebar-item" id="si-sfees" onclick="loadStudentFees(); setActiveSidebar('sfees')">
         <span class="si-icon">💰</span> Fees
@@ -601,10 +604,10 @@ function loadFAQ() {
     </details>
   `).join('');
 
-  setContent(`
+setContent(`
     <div class="page-header page-header-row">
       <div>
-        <h1>❓ Help & Support</h1>
+        <h1><i class="fas fa-question-circle" style="color:var(--primary-dark);"></i> Help & Support</h1>
         <p>Frequently asked questions and guides for your role.</p>
       </div>
     </div>
@@ -616,14 +619,14 @@ function loadFAQ() {
       </div>
 
       <div class="card" style="width: 350px; flex-shrink: 0;">
-        <div class="card-header"><span class="card-title">📞 Contact Administration</span></div>
+        <div class="card-header"><span class="card-title"><i class="fas fa-headset" style="color:var(--primary);"></i> Contact Administration</span></div>
         <div class="card-body">
           <p class="text-sm text-muted mb-16">Need further assistance? Reach out to the school administration directly.</p>
           
           <div style="margin-bottom: 24px; font-size: 13.5px; line-height: 1.6;">
-            <div><strong>📧 Email:</strong> support@lankalearn.lk</div>
-            <div><strong>📱 Phone:</strong> +94 11 234 5678</div>
-            <div><strong>⏰ Hours:</strong> Mon - Fri, 8:00 AM - 4:00 PM</div>
+            <div><strong><i class="fas fa-envelope" style="color:#64748b; margin-right:8px;"></i> Email:</strong> support@lankalearn.lk</div>
+            <div><strong><i class="fas fa-phone-alt" style="color:#64748b; margin-right:8px;"></i> Phone:</strong> +94 11 234 5678</div>
+            <div><strong><i class="fas fa-clock" style="color:#64748b; margin-right:8px;"></i> Hours:</strong> Mon - Fri, 8:00 AM - 4:00 PM</div>
           </div>
 
           <form id="supportForm" onsubmit="submitSupportTicket(event)">
@@ -635,7 +638,7 @@ function loadFAQ() {
               <label>Message</label>
               <textarea id="supportMessage" class="form-control" style="min-height: 100px;" placeholder="How can we help you?" required></textarea>
             </div>
-            <button type="submit" id="supportBtn" class="btn btn-primary w-full">✉️ Send Message</button>
+            <button type="submit" id="supportBtn" class="btn btn-primary w-full"><i class="fas fa-paper-plane"></i> Send Message</button>
           </form>
         </div>
       </div>
@@ -700,4 +703,49 @@ async function sendAiMessage() {
         const loadEl = document.getElementById(loadingId);
         if (loadEl) loadEl.innerText = "Connection error. Please try again.";
     }
+}
+
+
+// ================================================================
+// STUDENT TIMETABLE VIEW
+// ================================================================
+
+async function loadStudentTimetable() {
+    setPageTitle('Class Timetable');
+    setActiveSidebar('stimetable');
+    setContent('<div class="loading-state"><div class="spinner"></div></div>');
+    
+    try {
+        const entries = await api('/api/student/timetable');
+        const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+        
+        let html = `
+            <div class="page-header page-header-row">
+                <div><h1><i class="fas fa-clock" style="color:var(--primary-dark);"></i> My Class Timetable</h1><p>Your weekly live class schedule.</p></div>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:16px; margin-top:20px;">
+        `;
+
+        days.forEach(day => {
+            const dayEntries = entries.filter(e => e.day_of_week === day).sort((a,b) => a.start_time.localeCompare(b.start_time));
+            
+            html += `<div class="card" style="padding:0; border:none; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
+                <div style="background:var(--primary); color:white; text-align:center; font-weight:700; padding:10px; border-radius:8px 8px 0 0;">${day}</div>
+                <div style="padding:12px; background:#f8fafc; border:1px solid #e2e8f0; border-top:none; border-radius:0 0 8px 8px; min-height:200px;">
+                    ${dayEntries.length === 0 ? `<div class="text-center text-muted text-sm" style="margin-top:20px;">No Classes</div>` : ''}
+                    ${dayEntries.map(e => `
+                        <div style="background:white; border-left:3px solid #10b981; padding:10px; border-radius:4px; box-shadow:0 1px 2px rgba(0,0,0,0.05); margin-bottom:8px;">
+                            <div style="font-size:11px; font-weight:700; color:#10b981; margin-bottom:4px;"><i class="fas fa-clock"></i>&nbsp; ${e.start_time} - ${e.end_time}</div>
+                            <div style="font-size:13px; font-weight:700; color:var(--text); line-height:1.2;">${escHtml(e.course_name)}</div>
+                            <div style="font-size:11px; color:var(--text-muted); margin-top:6px;"><i class="fas fa-chalkboard-teacher"></i>&nbsp; ${escHtml(e.teacher_name || 'TBA')}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>`;
+        });
+        
+        html += `</div>`;
+        setContent(html);
+        
+    } catch(e) { setContent(`<div class="alert alert-error">Failed to load timetable: ${e.message}</div>`); }
 }

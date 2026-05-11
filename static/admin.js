@@ -25,32 +25,32 @@ async function loadAdminDashboard() {
   setContent(`
     <div class="page-header page-header-row">
       <div>
-        <h1>🏠 Admin Dashboard</h1>
+        <h1><i class="fas fa-home" style="color:var(--primary-dark);"></i> Admin Dashboard</h1>
         <p>Welcome back, ${escHtml(currentUser.full_name)}. Here's an overview of LankaLearn.</p>
       </div>
       <div class="flex gap-8">
-        <button class="btn btn-primary" style="background:#dc2626;" onclick="manageAlertsModal()">📢 Manage Alerts</button>
+        <button class="btn btn-primary" style="background:#dc2626;" onclick="manageAlertsModal()"><i class="fas fa-bullhorn"></i> Manage Alerts</button>
       </div>
     </div>
 
     <div class="stat-grid">
       <div class="stat-card">
-        <div class="stat-icon">👥</div>
+        <div class="stat-icon"><i class="fas fa-users" style="margin:0; color:var(--primary);"></i></div>
         <div class="stat-value">${stats.users || 0}</div>
         <div class="stat-label">Total Users</div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon">📚</div>
+        <div class="stat-icon"><i class="fas fa-book-open" style="margin:0; color:var(--primary);"></i></div>
         <div class="stat-value">${stats.courses || 0}</div>
         <div class="stat-label">Courses</div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon">🎓</div>
+        <div class="stat-icon"><i class="fas fa-graduation-cap" style="margin:0; color:var(--primary);"></i></div>
         <div class="stat-value">${stats.enrollments || 0}</div>
         <div class="stat-label">Enrollments</div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon">✏️</div>
+        <div class="stat-icon"><i class="fas fa-edit" style="margin:0; color:var(--primary);"></i></div>
         <div class="stat-value">${stats.submissions || 0}</div>
         <div class="stat-label">Submissions</div>
       </div>
@@ -160,9 +160,9 @@ async function loadExecutiveDashboard() {
 
     window._execTeachers = data.teachers;
 
-    setContent(`
+setContent(`
         <div class="page-header">
-            <h1>📈 Executive Overview</h1>
+            <h1><i class="fas fa-chart-line" style="color:var(--primary-dark);"></i> Executive Overview</h1>
             <p>School-wide analytics for administration.</p>
         </div>
         <div class="stat-grid" style="margin-bottom:24px;">
@@ -181,16 +181,16 @@ async function loadExecutiveDashboard() {
         </div>
         <div class="form-row form-row-2">
             <div class="card mb-24">
-                <div class="card-header"><span class="card-title">📊 Demographics (Click a Grade)</span></div>
+                <div class="card-header"><span class="card-title"><i class="fas fa-chart-pie" style="color:var(--primary);"></i> Demographics (Click a Grade)</span></div>
                 <div class="card-body" style="padding:16px 20px;">${demoHtml}</div>
             </div>
             <div class="card mb-24">
-                <div class="card-header"><span class="card-title">💰 Financial Health (Click for Arrears)</span></div>
+                <div class="card-header"><span class="card-title"><i class="fas fa-wallet" style="color:var(--primary);"></i> Financial Health (Click for Arrears)</span></div>
                 <div class="card-body">${finHtml}</div>
             </div>
         </div>
         <div class="card">
-            <div class="card-header"><span class="card-title">👨‍🏫 Teacher Workload & Performance</span></div>
+            <div class="card-header"><span class="card-title"><i class="fas fa-chalkboard-teacher" style="color:var(--primary);"></i> Teacher Workload & Performance</span></div>
             <div class="card-body" style="display:flex; gap:0; flex-wrap:wrap; padding:0;">
                 <div style="flex:1; min-width:280px; border-right:1px solid var(--border); background:#fafafa;">
                     ${data.teachers.map((t, idx) => `
@@ -199,13 +199,13 @@ async function loadExecutiveDashboard() {
                                 <div style="font-weight:700; color:var(--primary-dark); font-size:14px;">${escHtml(t.name)}</div>
                                 <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">${t.courses.length} Assigned Course(s)</div>
                             </div>
-                            <span style="color:var(--text-light); font-size:12px;">▶</span>
+                            <span style="color:var(--text-light); font-size:12px;"><i class="fas fa-chevron-right"></i></span>
                         </div>
                     `).join('')}
                     ${!data.teachers.length ? '<div style="padding:20px;" class="text-muted">No teachers assigned.</div>' : ''}
                 </div>
                 <div id="execTeacherDetails" style="flex:2; min-width:300px; padding:24px; background:white;">
-                    <div class="empty-state" style="margin-top:20px;"><div class="empty-icon" style="font-size:32px;">👈</div><p>Select a teacher to view details.</p></div>
+                    <div class="empty-state" style="margin-top:20px;"><div class="empty-icon" style="font-size:32px; color:var(--primary);"><i class="fas fa-hand-point-left"></i></div><p>Select a teacher to view details.</p></div>
                 </div>
             </div>
         </div>
@@ -240,13 +240,17 @@ async function loadExecutiveDashboard() {
                 const feeData = await api(`/api/admin/students/${s.id}/fees`);
                 const paid = feeData.payments.find(p => p.payment_type === 'monthly' && p.fee_month === currentMonth);
                 const status = paid ? `<span class="badge badge-green">✅ PAID</span>` : `<span class="badge badge-red">❌ UNPAID</span>`;
-                html += `<tr><td style="padding:12px 16px; border-bottom:1px solid #f1f5f9;"><strong>${escHtml(s.full_name)}</strong><br><span style="font-size:11px;">Adm: ${escHtml(s.admission_number || 'N/A')}</span></td><td style="padding:12px 16px; border-bottom:1px solid #f1f5f9; text-align:center;">${status}</td><td style="padding:12px 16px; border-bottom:1px solid #f1f5f9; text-align:right;"><button class="btn btn-success btn-xs" onclick="window.openPaymentPortal(${s.id}, '${escHtml(s.full_name)}')">💰 Record</button></td></tr>`;
+                html += `<tr><td style="padding:12px 16px; border-bottom:1px solid #f1f5f9;"><strong>${escHtml(s.full_name)}</strong><br><span style="font-size:11px;">Adm: ${escHtml(s.admission_number || 'N/A')}</span></td><td style="padding:12px 16px; border-bottom:1px solid #f1f5f9; text-align:center;">${status}</td><td style="padding:12px 16px; border-bottom:1px solid #f1f5f9; text-align:right;"><button class="btn btn-success btn-xs" onclick="window.openPaymentPortal(${s.id}, '${escHtml(s.full_name)}')"><i class="fas fa-coins"></i>&nbsp;Record</button></td></tr>`;
             }
             html += `</tbody></table></div>`;
             document.getElementById('modalBody').innerHTML = html;
         } catch (e) { document.getElementById('modalBody').innerHTML = `<div class="alert alert-error">Error: ${e.message}</div>`; }
     };
 }
+
+// ================================================================
+// SYSTEM AUDIT LOGS (DEDICATED MENU)
+// ================================================================
 
 // ================================================================
 // SYSTEM AUDIT LOGS (DEDICATED MENU)
@@ -267,30 +271,32 @@ async function loadAuditLogs() {
   setContent(`
     <div class="page-header page-header-row">
       <div>
-        <h1>🛡️ System Audit Logs</h1>
+        <h1><i class="fas fa-shield-alt" style="color:var(--primary-dark);"></i> System Audit Logs</h1>
         <p>Track all administrative and teaching actions across LankaLearn.</p>
       </div>
     </div>
 
     <div class="card mb-24">
       <div class="card-header" style="background:#fafafa; display:flex; gap:12px; flex-wrap:wrap; align-items:center; z-index:10; position:relative;">
-        <div style="font-size:13px; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Filters:</div>
+        <div style="font-size:13px; font-weight:700; color:var(--text-muted); text-transform:uppercase;">
+            <i class="fas fa-filter"></i> Filters:
+        </div>
         
         <select id="logRoleFilter" onchange="filterLogs()" class="form-control" style="width:auto; min-width:160px; padding:8px 12px; font-size:13px;">
-          <option value="all">🌐 All Roles</option>
-          <option value="admin">🔐 Admins & Staff</option>
-          <option value="teacher">👨‍🏫 Teachers</option>
+          <option value="all">All Roles</option>
+          <option value="admin">Admins & Staff</option>
+          <option value="teacher">Teachers</option>
         </select>
 
         <select id="logUserFilter" onchange="filterLogs()" class="form-control" style="width:auto; min-width:160px; padding:8px 12px; font-size:13px;">
-          <option value="all">👥 All Users</option>
+          <option value="all">All Users</option>
           ${uniqueUsers.map(u => `<option value="${escHtml(u)}">${escHtml(u)}</option>`).join('')}
         </select>
 
         <div id="multiSelectContainer" style="position:relative; width:auto; min-width:200px;">
             <div class="form-control" onclick="toggleActionDropdown(event)" style="cursor:pointer; padding:8px 12px; font-size:13px; display:flex; justify-content:space-between; align-items:center; background:white; user-select:none;">
-                <span id="actionSelectLabel">⚡ All Actions</span>
-                <span style="font-size:10px; color:#94a3b8;">▼</span>
+                <span id="actionSelectLabel"><i class="fas fa-bolt" style="color:#f59e0b;"></i> All Actions</span>
+                <span style="font-size:10px; color:#94a3b8;"><i class="fas fa-chevron-down"></i></span>
             </div>
             
             <div id="actionDropdown" style="display:none; position:absolute; top:100%; left:0; width:250px; background:white; border:1px solid var(--border); box-shadow:0 10px 25px rgba(0,0,0,0.15); border-radius:8px; max-height:350px; overflow-y:auto; z-index:9999; margin-top:4px;">
@@ -311,7 +317,7 @@ async function loadAuditLogs() {
 
         <div style="display:flex; align-items:center; gap:8px;">
             <input type="date" id="logDateFilter" onchange="filterLogs()" class="form-control" style="padding:8px 12px; font-size:13px;">
-            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('logDateFilter').value=''; filterLogs();">Clear Date</button>
+            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('logDateFilter').value=''; filterLogs();"><i class="fas fa-times"></i> Clear Date</button>
         </div>
       </div>
       
@@ -365,11 +371,11 @@ async function loadAuditLogs() {
       
       const label = document.getElementById('actionSelectLabel');
       if (checkedCbs.length === cbs.length) {
-          label.innerHTML = '⚡ All Actions';
+          label.innerHTML = '<i class="fas fa-bolt" style="color:#f59e0b;"></i> All Actions';
       } else if (checkedCbs.length === 0) {
-          label.innerHTML = '⚡ None Selected';
+          label.innerHTML = '<i class="fas fa-bolt" style="color:#f59e0b;"></i> None Selected';
       } else {
-          label.innerHTML = `⚡ ${checkedCbs.length} Selected`;
+          label.innerHTML = `<i class="fas fa-bolt" style="color:#f59e0b;"></i> ${checkedCbs.length} Selected`;
       }
       
       filterLogs();
@@ -457,7 +463,7 @@ async function loadAdminUsers(activeTab) {
     return `
       <div class="bulk-toolbar" id="teacherBulkBar" style="display:none; justify-content:space-between; background:#fee2e2; border:1px solid #fca5a5; padding:10px 16px; border-radius:8px; margin-bottom:12px;">
         <div><strong id="teacherSelCount">0</strong> selected</div>
-        <button class="btn btn-danger btn-sm" onclick="bulkDeleteUsers('teacher')">🗑️ Delete Selected</button>
+        <button class="btn btn-danger btn-sm" onclick="bulkDeleteUsers('teacher')"><i class="fas fa-trash-alt"></i>&nbsp; Delete Selected</button>
       </div>
       <div class="table-wrapper"><table><thead><tr>
         <th style="width:40px"><input type="checkbox" onchange="toggleSelectAll('teacher', this.checked)"></th>
@@ -482,12 +488,12 @@ async function loadAdminUsers(activeTab) {
     </tbody></table></div>`;
   }
 
-  function studentTable(list) {
+function studentTable(list) {
     if (!list.length) return '<p class="text-muted" style="padding:16px">None</p>';
     return `
       <div class="bulk-toolbar" id="studentBulkBar" style="display:none; justify-content:space-between; background:#fee2e2; border:1px solid #fca5a5; padding:10px 16px; border-radius:8px; margin-bottom:12px;">
         <div><strong id="studentSelCount">0</strong> selected</div>
-        <button class="btn btn-danger btn-sm" onclick="bulkDeleteUsers('student')">🗑️ Delete Selected</button>
+        <button class="btn btn-danger btn-sm" onclick="bulkDeleteUsers('student')"><i class="fas fa-trash"></i> Delete Selected</button>
       </div>
       <div class="table-wrapper"><table><thead><tr>
         <th style="width:40px"><input type="checkbox" onchange="toggleSelectAll('student', this.checked)"></th>
@@ -500,10 +506,10 @@ async function loadAdminUsers(activeTab) {
         <td><span class="grade-pill">${escHtml(u.grade || '—')}</span></td>
         <td>
           <div class="flex gap-8 flex-center">
-            <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'student')">Edit</button>
-            <button class="btn btn-success btn-sm" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="window.openPaymentPortal(${u.id},'${escHtml(u.full_name)}')">💰 Fees</button>
-            <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${u.id})" title="Print Profile">🖨️</button>
-            <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')">Reset PW</button>
+            <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'student')"><i class="fas fa-edit"></i> Edit</button>
+            <button class="btn btn-success btn-sm" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="window.openPaymentPortal(${u.id},'${escHtml(u.full_name)}')"><i class="fas fa-coins"></i> Fees</button>
+            <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${u.id})" title="Print Profile"><i class="fas fa-print"></i></button>
+            <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')"><i class="fas fa-key"></i> Reset PW</button>
           </div>
         </td>
       </tr>`).join('')}
@@ -533,64 +539,64 @@ async function loadAdminUsers(activeTab) {
 
   const gradeFilterOptions = GRADE_OPTIONS.map(g => `<option value="${g.value}">${g.label === '— Select Grade (or leave blank) —' ? 'All Grades' : g.label}</option>`).join('');
 
-  setContent(`
-    <div class="page-header page-header-row">
-      <div><h1>👥 Users</h1><p>Manage all accounts in the system</p></div>
-    </div>
-
-    <div class="tabs">
-      <button class="tab-btn" id="tbtn-tab-teachers" onclick="switchTab(this,'tab-teachers')">👨‍🏫 Teachers (${teachers.length})</button>
-      <button class="tab-btn" id="tbtn-tab-students" onclick="switchTab(this,'tab-students')">🎒 Students (${students.length})</button>
-      <button class="tab-btn" id="tbtn-tab-classes" onclick="switchTab(this,'tab-classes')">🏫 Classes</button>
-      <button class="tab-btn" id="tbtn-tab-subadmins" onclick="switchTab(this,'tab-subadmins')">🏢 Office Staff (${subAdmins.length})</button>
-      <button class="tab-btn" id="tbtn-tab-admins" onclick="switchTab(this,'tab-admins')">🔐 Admins (${admins.length})</button>
-    </div>
-
-    <div id="tab-teachers" class="tab-panel card" style="display:none">
-      <div class="card-header" style="background:#fafafa;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <input type="text" class="search-box" id="search-teacher" placeholder="🔍 Search teachers…" oninput="filterUserTable('teacher')">
-        <div style="flex:1"></div>
-        <button class="btn btn-primary btn-sm" onclick="showCreateUser('teacher')">+ Create Teacher</button>
+setContent(`
+      <div class="page-header page-header-row">
+        <div><h1><i class="fas fa-users" style="color:var(--primary-dark);"></i> Users</h1><p>Manage all accounts in the system</p></div>
       </div>
-      <div class="card-body" style="padding:16px">${teacherTable(teachers)}</div>
-    </div>
 
-    <div id="tab-students" class="tab-panel card" style="display:none">
-      <div class="card-header" style="background:#fafafa;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <input type="text" class="search-box" id="search-student" placeholder="🔍 Search students…" oninput="filterUserTable('student')">
-        <select class="form-control" id="filter-grade-student" style="width:160px; padding:7px 14px;" onchange="filterUserTable('student')">
-            ${gradeFilterOptions}
-        </select>
-        <div style="flex:1"></div>
-        <button class="btn btn-primary btn-sm" onclick="showCreateUser('student')">+ Create Student</button>
+      <div class="tabs">
+        <button class="tab-btn" id="tbtn-tab-teachers" onclick="switchTab(this,'tab-teachers')"><i class="fas fa-chalkboard-teacher"></i> Teachers (${teachers.length})</button>
+        <button class="tab-btn" id="tbtn-tab-students" onclick="switchTab(this,'tab-students')"><i class="fas fa-user-graduate"></i> Students (${students.length})</button>
+        <button class="tab-btn" id="tbtn-tab-classes" onclick="switchTab(this,'tab-classes')"><i class="fas fa-school"></i> Classes</button>
+        <button class="tab-btn" id="tbtn-tab-subadmins" onclick="switchTab(this,'tab-subadmins')"><i class="fas fa-building"></i> Office Staff (${subAdmins.length})</button>
+        <button class="tab-btn" id="tbtn-tab-admins" onclick="switchTab(this,'tab-admins')"><i class="fas fa-user-shield"></i> Admins (${admins.length})</button>
       </div>
-      <div class="card-body" style="padding:16px">${studentTable(students)}</div>
-    </div>
 
-    <div id="tab-classes" class="tab-panel card" style="display:none">
-      <div class="card-header" style="background:#fafafa;">
-        <h3 style="margin:0; font-size:16px;">Class Directory</h3>
-        <p class="text-sm text-muted">Students grouped by Grade Level</p>
+      <div id="tab-teachers" class="tab-panel card" style="display:none">
+        <div class="card-header" style="background:#fafafa;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <input type="text" class="search-box" id="search-teacher" placeholder="Search teachers…" oninput="filterUserTable('teacher')">
+          <div style="flex:1"></div>
+          <button class="btn btn-primary btn-sm" onclick="showCreateUser('teacher')"><i class="fas fa-plus"></i> Create Teacher</button>
+        </div>
+        <div class="card-body" style="padding:16px">${teacherTable(teachers)}</div>
       </div>
-      <div class="card-body" id="classDirectoryBody"></div>
-    </div>
 
-    <div id="tab-subadmins" class="tab-panel card" style="display:none">
-      <div class="card-header" style="background:#fafafa;display:flex;align-items:center;">
-        <h3 style="margin:0; font-size:16px;">Office Staff</h3>
-        <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showCreateUser('sub_admin')">+ Create Staff</button>
+      <div id="tab-students" class="tab-panel card" style="display:none">
+        <div class="card-header" style="background:#fafafa;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <input type="text" class="search-box" id="search-student" placeholder="Search students…" oninput="filterUserTable('student')">
+          <select class="form-control" id="filter-grade-student" style="width:160px; padding:7px 14px;" onchange="filterUserTable('student')">
+              ${gradeFilterOptions}
+          </select>
+          <div style="flex:1"></div>
+          <button class="btn btn-primary btn-sm" onclick="showCreateUser('student')"><i class="fas fa-plus"></i> Create Student</button>
+        </div>
+        <div class="card-body" style="padding:16px">${studentTable(students)}</div>
       </div>
-      <div class="card-body" style="padding:16px">${adminTable(subAdmins, 'sub_admin')}</div>
-    </div>
 
-    <div id="tab-admins" class="tab-panel card" style="display:none">
-      <div class="card-header" style="background:#fafafa;display:flex;align-items:center;">
-        <h3 style="margin:0; font-size:16px;">Admins</h3>
-        <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showCreateUser('admin')">+ Create Admin</button>
+      <div id="tab-classes" class="tab-panel card" style="display:none">
+        <div class="card-header" style="background:#fafafa;">
+          <h3 style="margin:0; font-size:16px;">Class Directory</h3>
+          <p class="text-sm text-muted">Students grouped by Grade Level</p>
+        </div>
+        <div class="card-body" id="classDirectoryBody"></div>
       </div>
-      <div class="card-body" style="padding:16px">${adminTable(admins, 'admin')}</div>
-    </div>
-  `);
+
+      <div id="tab-subadmins" class="tab-panel card" style="display:none">
+        <div class="card-header" style="background:#fafafa;display:flex;align-items:center;">
+          <h3 style="margin:0; font-size:16px;">Office Staff</h3>
+          <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showCreateUser('sub_admin')"><i class="fas fa-plus"></i> Create Staff</button>
+        </div>
+        <div class="card-body" style="padding:16px">${adminTable(subAdmins, 'sub_admin')}</div>
+      </div>
+
+      <div id="tab-admins" class="tab-panel card" style="display:none">
+        <div class="card-header" style="background:#fafafa;display:flex;align-items:center;">
+          <h3 style="margin:0; font-size:16px;">Admins</h3>
+          <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showCreateUser('admin')"><i class="fas fa-plus"></i> Create Admin</button>
+        </div>
+        <div class="card-body" style="padding:16px">${adminTable(admins, 'admin')}</div>
+      </div>
+    `);
 
   // Classes grouping
   const classGroups = {};
@@ -741,8 +747,8 @@ async function loadAdminCourses() {
 
   setContent(`
     <div class="page-header page-header-row">
-        <div><h1>📚 Courses</h1><p>Create and manage all courses</p></div>
-        <button class="btn btn-primary" onclick="showCreateCourse()">+ Create Course</button>
+        <div><h1><i class="fas fa-book" style="color:var(--primary-dark);"></i> Courses</h1><p>Create and manage all courses</p></div>
+        <button class="btn btn-primary" onclick="showCreateCourse()"><i class="fas fa-plus"></i> Create Course</button>
     </div>
 
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:16px;">
@@ -754,13 +760,13 @@ async function loadAdminCourses() {
             <select class="form-control" id="courseGradeFilter" onchange="filterCourses()" style="width:180px; padding:7px 14px;">
                 ${gradeFilterOptions}
             </select>
-            <input type="text" class="search-box" id="courseSearch" placeholder="🔍 Search courses..." oninput="filterCourses()">
+            <input type="text" class="search-box" id="courseSearch" placeholder="Search courses..." oninput="filterCourses()">
         </div>
     </div>
 
     <div class="bulk-toolbar" id="courseBulkBar" style="display:none; justify-content:space-between; background:#fee2e2; border:1px solid #fca5a5; padding:10px 16px; border-radius:8px; margin-bottom:20px;">
         <div><strong id="courseSelCount">0</strong> courses selected</div>
-        <button class="btn btn-danger btn-sm" onclick="bulkDeleteCourses()">🗑️ Delete Selected Courses</button>
+        <button class="btn btn-danger btn-sm" onclick="bulkDeleteCourses()"><i class="fas fa-trash"></i> Delete Selected Courses</button>
     </div>
 
     <div class="course-grid" id="adminCourseGrid">
@@ -776,10 +782,10 @@ async function loadAdminCourses() {
             <div class="course-card-name">${escHtml(c.name)}</div>
             <div class="course-card-desc">${escHtml(c.description||'No description')}</div>
             <div class="course-card-footer">
-              <div class="course-card-teacher">👨‍🏫 ${escHtml(c.teacher_name||'Unassigned')}</div>
+              <div class="course-card-teacher"><i class="fas fa-chalkboard-teacher"></i> ${escHtml(c.teacher_name||'Unassigned')}</div>
               <div class="flex gap-8">
-                <button class="btn btn-secondary btn-sm" onclick="manageEnrollments(${c.id},'${escHtml(c.name)}')">👥</button>
-                <button class="btn btn-secondary btn-sm" onclick="showEditCourse(${c.id})">Edit</button>
+                <button class="btn btn-secondary btn-sm" onclick="manageEnrollments(${c.id},'${escHtml(c.name)}')"><i class="fas fa-users"></i></button>
+                <button class="btn btn-secondary btn-sm" onclick="showEditCourse(${c.id})"><i class="fas fa-edit"></i> Edit</button>
               </div>
             </div>
           </div>
@@ -978,13 +984,13 @@ async function loadAdminFees() {
   setContent(`
     <div class="page-header page-header-row">
       <div style="display:flex; justify-content:space-between; width:100%;">
-        <div><h1>💰 Fee Portal</h1><p>Record payments and set grade fees.</p></div>
+        <div><h1><i class="fas fa-money-bill-wave" style="color:var(--primary-dark);"></i> Fee Portal</h1><p>Record payments and set grade fees.</p></div>
       </div>
     </div>
 
     <div class="card mb-24">
       <div class="card-header" style="cursor:pointer;" onclick="document.getElementById('masterFeesBody').style.display = document.getElementById('masterFeesBody').style.display === 'none' ? 'block' : 'none'">
-        <span class="card-title">⚙️ Master Grade Fees (Click to Expand/Collapse)</span>
+        <span class="card-title"><i class="fas fa-cogs"></i> Master Grade Fees (Click to Expand/Collapse)</span>
       </div>
       <div class="card-body" id="masterFeesBody" style="display:none;">
         <table style="width:100%; font-size:13px; margin-bottom:16px;">
@@ -998,8 +1004,8 @@ async function loadAdminFees() {
               <td style="padding:6px 0; border-top:1px solid #eee;"><strong>${escHtml(f.grade_name)}</strong></td>
               <td style="text-align:right; padding:6px 0; border-top:1px solid #eee;">${f.monthly_tuition.toLocaleString()}</td>
               <td style="text-align:right; padding:6px 0; border-top:1px solid #eee;">
-                <button class="btn btn-secondary btn-xs" onclick="editMasterFee('${escHtml(f.grade_name)}', ${f.monthly_tuition})">Edit</button>
-                <button class="btn btn-danger btn-xs" onclick="deleteMasterFee('${escHtml(f.grade_name)}')">✕</button>
+                <button class="btn btn-secondary btn-xs" onclick="editMasterFee('${escHtml(f.grade_name)}', ${f.monthly_tuition})"><i class="fas fa-edit"></i> Edit</button>
+                <button class="btn btn-danger btn-xs" onclick="deleteMasterFee('${escHtml(f.grade_name)}')"><i class="fas fa-trash"></i></button>
               </td>
             </tr>`).join('')}
             ${!gradeFees.length ? '<tr><td colspan="3" class="text-muted text-center" style="padding:10px;">No master fees set.</td></tr>' : ''}
@@ -1012,7 +1018,7 @@ async function loadAdminFees() {
              ${gradeOptionsHtml}
           </select>
           <input type="number" id="newGradeFee" class="form-control" placeholder="Amount (LKR)">
-          <button class="btn btn-primary" onclick="saveMasterGradeFee()">Save Fee</button>
+          <button class="btn btn-primary" onclick="saveMasterGradeFee()"><i class="fas fa-save"></i> Save Fee</button>
         </div>
       </div>
     </div>
@@ -1364,7 +1370,7 @@ window.printMasterFeeReport = async () => {
   const win = window.open('', '_blank');
   win.document.write(`<html><head><title>Master Fee Report</title>
     <style>body{font-family:Arial; padding:20px;} table{width:100%;border-collapse:collapse;margin-top:20px;font-size:12px;} th,td{padding:8px;border:1px solid #ddd;text-align:left;} th{background:#1e3a8a;color:white;}</style>
-    </head><body><h2>💰 LankaLearn - Master Student List</h2>
+    </head><body><h2><i class="fas fa-coins"></i>&nbsp;LankaLearn - Master Student List</h2>
     <table><tr><th>Student Name</th><th>Adm. No</th><th>Grade</th><th>Contact</th></tr>
     ${students.map(s => `<tr><td>${s.full_name}</td><td>${s.admission_number||'-'}</td><td>${s.grade||'-'}</td><td>${s.phone||'-'}</td></tr>`).join('')}
     </table><script>window.onload=()=>window.print()</script></body></html>`);
@@ -1483,10 +1489,6 @@ window.deleteSpecificAlert = async (id) => {
 // GLOBAL HELPERS
 // ================================================================
 
-// ================================================================
-// GLOBAL HELPERS
-// ================================================================
-
 window.execShowGradeStudents = async (gradeName) => {
     openModal(`Class Overview: ${gradeName}`, '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
     try {
@@ -1500,18 +1502,25 @@ window.execShowGradeStudents = async (gradeName) => {
         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; gap:16px; flex-wrap:wrap;">
             
             <div style="background:#eff6ff; border:1px solid #bfdbfe; padding:16px; border-radius:8px; flex:1; min-width:250px;">
-                <div style="font-size:11px; text-transform:uppercase; font-weight:700; color:#1e40af; margin-bottom:4px;">Class Teacher</div>
+                <div style="font-size:11px; text-transform:uppercase; font-weight:700; color:#1e40af; margin-bottom:8px;">Class Teacher</div>
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <div style="font-size:16px; font-weight:700; color:#1e3a8a;">👨‍🏫 ${escHtml(classDetails.teacher_name)}</div>
                     <button class="btn btn-secondary btn-xs" onclick="window.assignClassTeacher('${escHtml(gradeName)}')">Change</button>
                 </div>
             </div>
 
-            <div style="background:#f8fafc; border:1px solid var(--border); padding:16px; border-radius:8px; flex:1; min-width:250px;">
-                <div style="font-size:11px; text-transform:uppercase; font-weight:700; color:var(--text-muted); margin-bottom:8px;">Class Operations</div>
-                <div class="flex gap-8">
-                    <button class="btn btn-primary btn-sm w-full" onclick="window.assignCourseToClass('${escHtml(gradeName)}')">📚 Assign Course to Class</button>
-                    <button class="btn btn-secondary btn-sm" onclick="window.printClassReportCards('${escHtml(gradeName)}')">🖨️ Print Reports</button>
+            <div style="background:#f8fafc; border:1px solid var(--border); padding:16px; border-radius:8px; flex:1.2; min-width:280px;">
+                <div style="font-size:11px; text-transform:uppercase; font-weight:700; color:var(--text-muted); margin-bottom:12px;">Class Operations</div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                    <button class="btn btn-primary btn-sm" style="grid-column: span 2;" onclick="window.assignCourseToClass('${escHtml(gradeName)}')">
+                        <i class="fas fa-book-open"></i>&nbsp; Assign Course to Class
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="window.printClassReportCards('${escHtml(gradeName)}')">
+                        🖨️ Print Reports
+                    </button>
+                    <button class="btn btn-primary btn-sm" style="background:#8b5cf6;" onclick="window.manageClassTimetable('${escHtml(gradeName)}')">
+                        📅 Timetable
+                    </button>
                 </div>
             </div>
         </div>
@@ -1546,7 +1555,7 @@ window.execShowGradeStudents = async (gradeName) => {
                     <td style="padding:14px 16px; border-bottom:1px solid #f1f5f9; text-align:center;">
                         <div class="flex gap-8 flex-center" style="justify-content:center;">
                             <button class="btn btn-secondary btn-xs" onclick="window.printUserProfile(${s.id})">👤 Profile</button>
-                            <button class="btn btn-success btn-xs" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="window.openPaymentPortal(${s.id}, '${escHtml(s.full_name)}')">💰 Fees</button>
+                            <button class="btn btn-success btn-xs" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="window.openPaymentPortal(${s.id}, '${escHtml(s.full_name)}')"><i class="fas fa-coins"></i>&nbsp;Fees</button>
                             <button class="btn btn-secondary btn-xs" onclick="window.printTermReportCard(${s.id}, '${escHtml(s.full_name)}')">📄 Report</button>
                         </div>
                     </td>
@@ -1842,7 +1851,7 @@ async function loadAdminFees() {
   setContent(`
     <div class="page-header page-header-row">
       <div style="display:flex; justify-content:space-between; width:100%;">
-        <div><h1>💰 Fee Portal</h1><p>Record payments, set grade fees, and track arrears.</p></div>
+        <div><h1><i class="fas fa-coins"></i>&nbsp;Fee Portal</h1><p>Record payments, set grade fees, and track arrears.</p></div>
       </div>
     </div>
 
@@ -2136,15 +2145,15 @@ async function loadTrashBin(activeTab = 'trash-users') {
   setContent(`
     <div class="page-header page-header-row">
       <div>
-        <h1>🗑️ Trash Bin</h1>
+        <h1><i class="fas fa-trash-alt"></i>&nbsp; Trash Bin</h1>
         <p>Safely restore accidentally deleted records, or permanently destroy them.</p>
       </div>
     </div>
 
     <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab(this,'trash-users')">👥 Users (${trash.users.length})</button>
-      <button class="tab-btn" onclick="switchTab(this,'trash-courses')">📚 Courses (${trash.courses.length})</button>
-      <button class="tab-btn" onclick="switchTab(this,'trash-fees')">💰 Fees (${trash.fees.length})</button>
+      <button class="tab-btn active" onclick="switchTab(this,'trash-users')"><i class="fas fa-users"></i>&nbsp; Users (${trash.users.length})</button>
+      <button class="tab-btn" onclick="switchTab(this,'trash-courses')"><i class="fas fa-book-open"></i>&nbsp; Courses (${trash.courses.length})</button>
+      <button class="tab-btn" onclick="switchTab(this,'trash-fees')"><i class="fas fa-coins"></i>&nbsp;Fees (${trash.fees.length})</button>
     </div>
 
     <div id="trash-users" class="tab-panel card" style="display:block">
@@ -2219,5 +2228,139 @@ window.destroyItem = async (type, id) => {
         showToast('Record destroyed forever.', 'success');
         const activeTab = document.querySelector('.tab-btn.active').getAttribute('onclick').match(/'([^']+)'/)[1];
         loadTrashBin(activeTab);
+    } catch(e) { showToast(e.message, 'error'); }
+};
+
+// ================================================================
+// TIMETABLE MANAGEMENT
+// ================================================================
+
+window.manageClassTimetable = async (gradeName) => {
+    openModal(`Weekly Timetable: ${gradeName}`, '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
+    
+    try {
+        const data = await api(`/api/classes/${encodeURIComponent(gradeName)}/timetable`);
+        const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+        
+        let html = `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+                <p class="text-muted text-sm" style="margin:0;">Click any existing slot to remove it.</p>
+                <button class="btn btn-primary btn-sm" onclick="showAddTimetableSlot('${escHtml(gradeName)}')">
+                    <span style="margin-right:4px;">➕</span> Add Class Slot
+                </button>
+            </div>
+
+            <div style="width: 100%; overflow-x: auto; padding-bottom: 12px; border-radius: 8px;">
+                <div style="display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 12px; min-height: 400px;">
+        `;
+
+        days.forEach(day => {
+            const dayEntries = data.entries.filter(e => e.day_of_week === day).sort((a,b) => a.start_time.localeCompare(b.start_time));
+            
+            html += `
+                <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; overflow: hidden;">
+                    <div style="background: #e2e8f0; color: var(--primary-dark); text-align: center; font-weight: 800; font-size: 12px; text-transform: uppercase; padding: 10px; letter-spacing: 0.5px;">
+                        ${day}
+                    </div>
+                    <div style="padding: 12px; display: flex; flex-direction: column; gap: 10px; flex: 1;">
+                        ${dayEntries.length === 0 ? `<div class="text-center text-muted text-sm" style="margin-top:20px;">No Classes</div>` : ''}
+                        ${dayEntries.map(e => `
+                            <div style="background: white; border: 1px solid var(--border); border-left: 4px solid #8b5cf6; padding: 10px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); cursor: pointer; transition: all 0.2s;" 
+                                 onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 8px rgba(0,0,0,0.08)';" 
+                                 onmouseout="this.style.transform='none'; this.style.boxShadow='0 2px 4px rgba(0,0,0,0.02)';"
+                                 onclick="deleteTimetableSlot(${e.id}, '${escHtml(gradeName)}')">
+                                <div style="font-size: 11px; font-weight: 700; color: #8b5cf6; margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+                                    🕒 ${e.start_time} - ${e.end_time}
+                                </div>
+                                <div style="font-size: 13px; font-weight: 700; line-height: 1.3; color: var(--text); margin-bottom: 6px;">
+                                    ${escHtml(e.course_name)}
+                                </div>
+                                <div style="font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 4px;">
+                                    👨‍🏫 ${escHtml(e.teacher_name || 'TBA')}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>`;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+        window._currentTimetableCourses = data.courses; // Save courses for the dropdown
+        document.getElementById('modalBody').innerHTML = html;
+        
+    } catch(e) { document.getElementById('modalBody').innerHTML = `<div class="alert alert-error">${e.message}</div>`; }
+};
+
+window.showAddTimetableSlot = (gradeName) => {
+    const courses = window._currentTimetableCourses || [];
+    
+    // Sort courses nicely, putting ones that match the grade at the top
+    const sortedCourses = courses.sort((a, b) => {
+        if (a.grade === gradeName && b.grade !== gradeName) return -1;
+        if (a.grade !== gradeName && b.grade === gradeName) return 1;
+        return a.name.localeCompare(b.name);
+    });
+
+    // PRO-UI: Made the form inset and integrated cleanly
+    const formHtml = `
+        <div id="addSlotFormContainer" style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                <h4 style="margin:0; color:var(--primary-dark); font-size:15px;">➕ Add Class Slot</h4>
+                <button class="btn btn-secondary btn-xs" onclick="document.getElementById('addSlotFormContainer').remove()" style="border:none; background:transparent; font-size:16px; cursor:pointer;" title="Close">✕</button>
+            </div>
+            <div class="form-row form-row-2" style="margin-bottom:16px;">
+                <div class="form-group" style="margin:0;">
+                    <label style="font-size:12px; font-weight:600;">Day of Week</label>
+                    <select id="ttDay" class="form-control" style="font-size:13px; padding:8px;">
+                        <option value="Monday">Monday</option><option value="Tuesday">Tuesday</option>
+                        <option value="Wednesday">Wednesday</option><option value="Thursday">Thursday</option><option value="Friday">Friday</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <label style="font-size:12px; font-weight:600;">Subject / Course</label>
+                    <select id="ttCourse" class="form-control" style="font-size:13px; padding:8px;">
+                        ${sortedCourses.map(c => `<option value="${c.id}">${c.grade === gradeName ? '⭐ ' : ''}${escHtml(c.name)}</option>`).join('')}
+                    </select>
+                </div>
+            </div>
+            <div class="form-row form-row-2" style="margin-bottom:20px;">
+                <div class="form-group" style="margin:0;"><label style="font-size:12px; font-weight:600;">Start Time</label><input type="time" id="ttStart" class="form-control" style="font-size:13px; padding:8px;" step="900" required></div>
+                <div class="form-group" style="margin:0;"><label style="font-size:12px; font-weight:600;">End Time</label><input type="time" id="ttEnd" class="form-control" style="font-size:13px; padding:8px;" step="900" required></div>
+            </div>
+            <div style="display:flex; justify-content:flex-end;">
+                <button class="btn btn-primary" onclick="submitTimetableSlot('${escHtml(gradeName)}')" style="padding:8px 24px;">Save Slot</button>
+            </div>
+        </div>
+    `;
+    
+    const body = document.getElementById('modalBody');
+    if (!document.getElementById('addSlotFormContainer')) {
+        body.insertAdjacentHTML('afterbegin', formHtml);
+    }
+};
+
+window.submitTimetableSlot = async (gradeName) => {
+    const day = document.getElementById('ttDay').value;
+    const courseId = document.getElementById('ttCourse').value;
+    const start = document.getElementById('ttStart').value;
+    const end = document.getElementById('ttEnd').value;
+    
+    if(!start || !end) return showToast("Please set both start and end times", "error");
+    
+    try {
+        await apiJSON(`/api/admin/classes/${encodeURIComponent(gradeName)}/timetable`, { day, course_id: courseId, start_time: start, end_time: end });
+        showToast("Slot added!", "success");
+        manageClassTimetable(gradeName); // Refresh the view
+    } catch(e) { showToast(e.message, 'error'); }
+};
+
+window.deleteTimetableSlot = async (id, gradeName) => {
+    if(!confirm("Remove this class from the timetable?")) return;
+    try {
+        await apiDelete(`/api/admin/timetable/${id}`);
+        manageClassTimetable(gradeName); // Refresh the view
     } catch(e) { showToast(e.message, 'error'); }
 };

@@ -107,6 +107,27 @@ body {
 }
 
 
+/* Gives all FontAwesome icons a uniform width, perfect spacing, and a forced visible color */
+.fas, .far, .fab, .fa-solid {
+    width: 20px;
+    text-align: center;
+    margin-right: 8px;
+    color: var(--text, #334155); /* Forces a dark slate color if your variable fails */
+}
+
+/* Specific fix for sidebar icons */
+.si-icon {
+    display: inline-block;
+    margin-right: 12px;
+    font-size: 16px;
+    color: #64748b; /* Forces sidebar icons to be a visible gray */
+}
+
+/* Make them light up when the sidebar item is active! */
+.sidebar-item.active .si-icon {
+    color: var(--primary, #2563eb); 
+}
+
 /* Remove the hover rule and replace with this */
 .header-user.active .user-dropdown {
   display: block;

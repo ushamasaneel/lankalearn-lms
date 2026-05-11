@@ -1529,6 +1529,66 @@ async def permanent_delete_trash(request: Request, user=Depends(require_role("su
     finally:
         DB_POOL.putconn(db)
 
+
+
+
+
+# ================================================================
+# TIMETABLE API
+# ================================================================
+
+@app.get("/api/classes/{grade_name}/timetable")
+def get_class_timetable(grade_name: str, user=Depends(require_user)):
+    """Fetches the timetable and available courses for a specific grade."""
+    db = get_db()
+    try:
+        entries = query("""
+            SELECT t.*, c.name as course_name, c.code, u.full_name as teacher_name 
+            FROM class_timetables t 
+            JOIN courses c ON t.course_id = c.id 
+            LEFT JOIN users u ON c.teacher_id = u.id 
+            WHERE t.grade=? ORDER BY t.start_time
+        """, (grade_name,), db=db)
+        
+        # Get all courses so the admin can assign them to the timetable
+        courses = query("SELECT id, name, code, grade FROM courses ORDER BY name", db=db)
+        return {"entries": entries, "courses": courses}
+    finally:
+        DB_POOL.putconn(db)
+
+@app.post("/api/admin/classes/{grade_name}/timetable")
+async def add_timetable_slot(grade_name: str, request: Request, user=Depends(require_role("admin", "super_admin", "sub_admin"))):
+    data = await request.json()
+    execute("""
+        INSERT INTO class_timetables(grade, course_id, day_of_week, start_time, end_time) 
+        VALUES(?,?,?,?,?)
+    """, (grade_name, data['course_id'], data['day'], data['start_time'], data['end_time']))
+    log_audit(user["id"], "Added Timetable Slot", f"Class: {grade_name} | Day: {data['day']} | Time: {data['start_time']}")
+    return {"ok": True}
+
+@app.delete("/api/admin/timetable/{entry_id}")
+def delete_timetable_slot(entry_id: int, user=Depends(require_role("admin", "super_admin", "sub_admin"))):
+    execute("DELETE FROM class_timetables WHERE id=?", (entry_id,))
+    return {"ok": True}
+
+@app.get("/api/student/timetable")
+def get_student_timetable(user=Depends(require_role("student"))):
+    """Fetches the specific timetable for the logged-in student based on their grade."""
+    grade_data = query("SELECT grade FROM users WHERE id=?", (user["id"],), one=True)
+    if not grade_data or not grade_data["grade"]:
+        return []
+        
+    return query("""
+        SELECT t.*, c.name as course_name, c.code, u.full_name as teacher_name 
+        FROM class_timetables t 
+        JOIN courses c ON t.course_id = c.id 
+        LEFT JOIN users u ON c.teacher_id = u.id 
+        WHERE t.grade=? ORDER BY t.start_time
+    """, (grade_data["grade"],))
+
+
+
+
 # ---------------------------------------------------------------------------
 # Teacher API - courses
 # ---------------------------------------------------------------------------
