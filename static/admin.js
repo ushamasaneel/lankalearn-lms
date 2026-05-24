@@ -473,8 +473,17 @@ async function loadAdminUsers(activeTab) {
         const isYou = u.id === currentUser.id;
         return `<tr class="user-row-teacher">
           <td>${!isYou ? `<input type="checkbox" class="chk-teacher" value="${u.id}" onchange="updateBulkBar('teacher')">` : ''}</td>
-          <td><strong>${escHtml(u.full_name)}</strong><br><code class="row-username">${escHtml(u.username)}</code></td>
-          <td>${escHtml(u.phone || '—')}</td>
+          <td>
+            <strong>${escHtml(u.full_name)}</strong>
+            <br><code class="row-username">${escHtml(u.username)}</code>
+          </td>
+          <td>
+            ${escHtml(u.phone || '—')}
+            <br>
+            <span class="badge ${u.employment_status === 'guest' ? 'badge-yellow' : 'badge-green'}" style="margin-top:4px;">
+                ${u.employment_status === 'guest' ? 'Guest' : 'Long Term'}
+            </span>
+          </td>
           <td>
             <div class="flex gap-8 flex-center">
               ${isYou ? '<span class="text-muted">You</span>' : `
@@ -691,6 +700,8 @@ function showCreateUser(role) {
   const roleTitle = role.charAt(0).toUpperCase() + role.slice(1);
   const gradeField = role === 'student' ? [{ label: 'Grade', name: 'grade', type: 'select', options: GRADE_OPTIONS }] : [];
   const admissionField = role === 'student' ? [{ label: 'Admission Number', name: 'admission_number', placeholder: 'e.g. LL-2026-0001' }] : [];
+  const employmentField = role === 'teacher' ? [{ label: 'Employment Status', name: 'employment_status', type: 'select', options: [{value: 'long-term', label: 'Long Term'}, {value: 'guest', label: 'Guest Teacher'}] }] : [];
+
   openModal(`Create New ${roleTitle}`, modalForm([
     { name: 'role', type: 'hidden', value: role },
     { label: 'Full Name', name: 'full_name', placeholder: 'e.g. Kasun Perera', required: true },
@@ -699,7 +710,7 @@ function showCreateUser(role) {
     { label: 'Phone Number', name: 'phone', type: 'tel' },
     { label: 'Date of Birth', name: 'dob', type: 'date' },
     { label: 'Address', name: 'address', type: 'textarea' },
-    ...gradeField, ...admissionField,
+    ...gradeField, ...admissionField, ...employmentField, // <--- Updated
     { label: 'Additional Notes', name: 'notes', type: 'textarea' },
     { label: 'Profile Image', name: 'file', type: 'file' }
   ], async (fd) => {
@@ -714,6 +725,8 @@ function showEditUser(id, roleLabel) {
   const roleTitle = roleLabel.charAt(0).toUpperCase() + roleLabel.slice(1);
   const gradeField = roleLabel === 'student' ? [{ label: 'Grade', name: 'grade', type: 'select', value: u.grade || '', options: GRADE_OPTIONS }] : [];
   const admissionField = roleLabel === 'student' ? [{ label: 'Admission Number', name: 'admission_number', value: u.admission_number || '' }] : [];
+  const employmentField = roleLabel === 'teacher' ? [{ label: 'Employment Status', name: 'employment_status', type: 'select', value: u.employment_status || 'long-term', options: [{value: 'long-term', label: 'Long Term'}, {value: 'guest', label: 'Guest Teacher'}] }] : [];
+
   openModal(`Edit ${roleTitle}: ${u.full_name}`, modalForm([
     { label: 'Full Name', name: 'full_name', value: u.full_name, required: true },
     { label: 'Username', name: 'username', value: u.username, required: true },
@@ -721,8 +734,8 @@ function showEditUser(id, roleLabel) {
     { label: 'Phone Number', name: 'phone', type: 'tel', value: u.phone || '' },
     { label: 'Date of Birth', name: 'dob', type: 'date', value: u.dob || '' },
     { label: 'Address', name: 'address', type: 'textarea', value: u.address || '' },
+    ...gradeField, ...admissionField, ...employmentField, // <--- Updated
     { label: 'Additional Notes', name: 'notes', type: 'textarea', value: u.notes || '' },
-    ...gradeField, ...admissionField,
     { label: 'Update Profile Image', name: 'file', type: 'file' }
   ], async (fd) => {
     try { await api(`/api/admin/users/${id}`, { method: 'PUT', body: fd }); closeModal(); showToast('User updated!', 'success'); loadAdminUsers('tab-' + roleLabel + 's');

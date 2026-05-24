@@ -852,7 +852,7 @@ def list_users(user=Depends(require_role("admin", "sub_admin", "super_admin"))):
         existing = {row[0] for row in cur.fetchall()}
     DB_POOL.putconn(db) 
 
-    optional = ["dob", "address", "phone", "notes", "profile_image", "grade", "admission_number"]
+    optional = ["dob", "address", "phone", "notes", "profile_image", "grade", "admission_number", "employment_status"]
     select_cols = ["id", "username", "full_name", "role", "created_at"] + [c for c in optional if c in existing]
     
     # SMART FALLBACK: Only filter by deleted if the column actually exists!
@@ -1209,6 +1209,7 @@ async def create_user(
     role: str = Form(...), dob: str = Form(""), address: str = Form(""), 
     phone: str = Form(""), notes: str = Form(""),
     grade: str = Form(""), admission_number: str = Form(""),
+    employment_status: str = Form("long-term"), # <--- ADDED
     file: UploadFile = File(None), user=Depends(require_role("admin", "sub_admin", "super_admin"))
 ):
     # 1. ALLOW THE NEW ROLES HERE
@@ -1244,9 +1245,9 @@ async def create_user(
                 buffer.write(content_bytes)
 
         uid = execute("""
-            INSERT INTO users(username, password_hash, full_name, role, dob, address, phone, notes, profile_image, grade, admission_number, must_change_password) 
-            VALUES(?,?,?,?,?,?,?,?,?,?,?, TRUE)
-        """, (username, hash_pw(password), full_name, role, dob, address, phone, notes, saved_filename, grade, admission_number))
+            INSERT INTO users(username, password_hash, full_name, role, dob, address, phone, notes, profile_image, grade, admission_number, employment_status, must_change_password) 
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?, TRUE)
+        """, (username, hash_pw(password), full_name, role, dob, address, phone, notes, saved_filename, grade, admission_number, employment_status))
         
         # --- LOG ACTION ---
         log_audit(user["id"], "Created User", f"{full_name} ({role})")
@@ -1262,8 +1263,9 @@ async def update_user(
     uid: int, full_name: str = Form(...), username: str = Form(...), password: str = Form(""), 
     dob: str = Form(""), address: str = Form(""), phone: str = Form(""), notes: str = Form(""),
     grade: str = Form(""), admission_number: str = Form(""),
+    employment_status: str = Form("long-term"), # <--- ADDED
     file: UploadFile = File(None), user=Depends(require_role("admin", "sub_admin", "super_admin"))
-):
+):  
     target = query("SELECT role, profile_image, full_name FROM users WHERE id=?", (uid,), one=True)
     if not target: raise HTTPException(404, "User not found")
     
@@ -1298,12 +1300,12 @@ async def update_user(
 
         if password:
             execute("""
-                UPDATE users SET full_name=?, username=?, password_hash=?, dob=?, address=?, phone=?, notes=?, profile_image=?, grade=?, admission_number=? WHERE id=?
-            """, (full_name, username, hash_pw(password), dob, address, phone, notes, saved_filename, grade, admission_number, uid))
+                UPDATE users SET full_name=?, username=?, password_hash=?, dob=?, address=?, phone=?, notes=?, profile_image=?, grade=?, admission_number=?, employment_status=? WHERE id=?
+            """, (full_name, username, hash_pw(password), dob, address, phone, notes, saved_filename, grade, admission_number, employment_status, uid))
         else:
             execute("""
-                UPDATE users SET full_name=?, username=?, dob=?, address=?, phone=?, notes=?, profile_image=?, grade=?, admission_number=? WHERE id=?
-            """, (full_name, username, dob, address, phone, notes, saved_filename, grade, admission_number, uid))
+                UPDATE users SET full_name=?, username=?, dob=?, address=?, phone=?, notes=?, profile_image=?, grade=?, admission_number=?, employment_status=? WHERE id=?
+            """, (full_name, username, dob, address, phone, notes, saved_filename, grade, admission_number, employment_status, uid))
             
         # --- LOG ACTION ---
         log_audit(user["id"], "Updated User", f"{full_name} ({target['role']})")
@@ -2591,6 +2593,7 @@ def fix_database():
         ("users", "dob", "TEXT"), ("users", "address", "TEXT"), ("users", "phone", "TEXT"),
         ("users", "notes", "TEXT"), ("users", "profile_image", "TEXT"), 
         ("users", "grade", "TEXT"), ("users", "admission_number", "TEXT"),
+        ("users", "employment_status", "TEXT DEFAULT 'long-term'"), # <--- ADDED THIS
         ("users", "must_change_password", "BOOLEAN DEFAULT FALSE"),
         ("courses", "grade", "TEXT")
     ]
