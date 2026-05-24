@@ -22,6 +22,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('userAvatar').textContent = initials;
 
   buildSidebar();
+  initializeUserPreferences(); // <--- ADD THIS LINE HERE
+
+  // ... rest of your code ...
 
   if (currentUser.must_change_password) {
       openModal('Security Required', `
@@ -127,7 +130,10 @@ function buildSidebar() {
         <i class="fas fa-book si-icon"></i> Courses
       </div>
       <div class="sidebar-item" id="si-fees" onclick="loadAdminFees(); setActiveSidebar('fees')">
-        <i class="fas fa-money-bill-wave si-icon"></i> Fees
+        <i class="fas fa-money-bill-wave si-icon"></i> Student Fees
+      </div>
+      <div class="sidebar-item" id="si-tsalaries" onclick="loadTeacherSalaries(); setActiveSidebar('tsalaries')">
+        <i class="fas fa-file-invoice-dollar si-icon"></i> Teacher Salaries
       </div>
       <div class="sidebar-divider"></div>
       <div class="sidebar-heading">System</div>
@@ -151,13 +157,16 @@ function buildSidebar() {
     nav.innerHTML = `
       <div class="sidebar-heading">Teaching</div>
       <div class="sidebar-item" id="si-tdash" onclick="loadTeacherDashboard(); setActiveSidebar('tdash')">
-        <span class="si-icon">🏠</span> Dashboard
+        <span class="si-icon"><i class="fas fa-home"></i></span> Dashboard
       </div>
       <div class="sidebar-item" id="si-tcal" onclick="loadCalendar(); setActiveSidebar('tcal')">
-        <span class="si-icon">📅</span> Calendar
+        <span class="si-icon"><i class="fas fa-calendar-alt"></i></span> Calendar
+      </div>
+      <div class="sidebar-item" id="si-msalary" onclick="loadTeacherSalaryView(); setActiveSidebar('msalary')">
+        <span class="si-icon"><i class="fas fa-file-invoice-dollar"></i></span> My Salary
       </div>
       <div class="sidebar-item" id="si-help" onclick="loadFAQ(); setActiveSidebar('help')">
-        <span class="si-icon">❓</span> Help & Support
+        <span class="si-icon"><i class="fas fa-question-circle"></i></span> Help & Support
       </div>
       <div class="sidebar-divider"></div>
       <div class="sidebar-heading">My Courses</div>
@@ -168,19 +177,19 @@ function buildSidebar() {
     nav.innerHTML = `
       <div class="sidebar-heading">Learning</div>
       <div class="sidebar-item" id="si-sdash" onclick="loadStudentDashboard(); setActiveSidebar('sdash')">
-        <span class="si-icon">🏠</span> Dashboard
+        <span class="si-icon"><i class="fas fa-home"></i></span> Dashboard
       </div>
       <div class="sidebar-item" id="si-scal" onclick="loadCalendar(); setActiveSidebar('scal')">
-        <span class="si-icon">📅</span> Calendar
+        <span class="si-icon"><i class="fas fa-calendar-alt"></i></span> Calendar
       </div>
       <div class="sidebar-item" id="si-stimetable" onclick="loadStudentTimetable(); setActiveSidebar('stimetable')">
-        <span class="si-icon">⏰</span> Class Timetable
+        <span class="si-icon"><i class="fas fa-clock"></i></span> Class Timetable
       </div>
       <div class="sidebar-item" id="si-sfees" onclick="loadStudentFees(); setActiveSidebar('sfees')">
-        <span class="si-icon">💰</span> Fees
+        <span class="si-icon"><i class="fas fa-money-bill-wave"></i></span> Fees
       </div>
       <div class="sidebar-item" id="si-help" onclick="loadFAQ(); setActiveSidebar('help')">
-        <span class="si-icon">❓</span> Help & Support
+        <span class="si-icon"><i class="fas fa-question-circle"></i></span> Help & Support
       </div>
       <div class="sidebar-divider"></div>
       <div class="sidebar-heading">My Courses</div>
@@ -239,7 +248,7 @@ async function loadCalendar() {
   setPageTitle('Calendar');
   const roleCode = currentUser.role === 'admin' ? 'cal' : (currentUser.role === 'teacher' ? 'tcal' : 'scal');
   setActiveSidebar(roleCode);
-  setContent('<div class="loading-state"><div class="spinner"></div></div>');
+  setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading LankaLearn...</p></div>');
   
   // Inject CSS for the Grid (Responsive scaling instead of a list)
   if (!document.getElementById('calGridStyles')) {
@@ -353,11 +362,11 @@ window.changeMonth = (offset) => {
 };
 
 window.showAddEventModal = async () => {
-  let typeOptions = `<option value="personal">👤 Personal Reminder</option>`;
+  let typeOptions = `<option value="personal"><i class="fas fa-user"></i> Personal Reminder</option>`;
   let courseSelectHtml = '';
-  if (currentUser.role === 'admin') typeOptions = `<option value="global">🏫 Global School Event (All Users)</option>` + typeOptions;
+  if (currentUser.role === 'admin') typeOptions = `<option value="global"><i class="fas fa-school"></i> Global School Event (All Users)</option>` + typeOptions;
   else if (currentUser.role === 'teacher') {
-    typeOptions = `<option value="course">🎒 Course Event</option>` + typeOptions;
+    typeOptions = `<option value="course"><i class="fas fa-backpack"></i> Course Event</option>` + typeOptions;
     const courses = await api('/api/teacher/courses').catch(() => []);
     courseSelectHtml = `<div class="form-group" id="courseSelectGroup"><label>Course</label><select name="course_id" class="form-control">${courses.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('')}</select></div>`;
   }
@@ -413,7 +422,7 @@ window.viewCalendarEvent = (eid) => {
   if(!e) return;
   const canDelete = ['global', 'course', 'personal'].includes(e.type) && (currentUser.role === 'admin' || e.user_id === currentUser.id);
   openModal(e.title, `
-    <div class="alert alert-info">📅 From: ${e.start_date.replace('T', ' ')}<br>📅 To: ${e.end_date ? e.end_date.replace('T', ' ') : '—'}</div>
+    <div class="alert alert-info"><i class="fas fa-calendar-alt"></i> From: ${e.start_date.replace('T', ' ')}<br><i class="fas fa-calendar-alt"></i> To: ${e.end_date ? e.end_date.replace('T', ' ') : '—'}</div>
     <p>${e.course_name ? `<strong>Course:</strong> ${escHtml(e.course_name)}` : ''}</p>
     <p>${e.description || 'No additional details provided.'}</p>
     ${canDelete ? `<div style="margin-top:20px; border-top:1px solid var(--border); padding-top:16px; text-align:right;"><button class="btn btn-danger btn-sm" onclick="deleteCalendarEvent(${e.id})">Delete Event</button></div>` : ''}
@@ -431,7 +440,7 @@ window.deleteCalendarEvent = async (eid) => {
 // ---- Course view router ----
 async function loadCourseView(courseId, courseName) {
   setPageTitle(courseName);
-  setContent('<div class="loading-state"><div class="spinner"></div></div>');
+  setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading LankaLearn...</p></div>');
   
   // Only inject into sidebar if we are actually on a mobile device
   if (window.innerWidth <= 900) {
@@ -517,27 +526,27 @@ function renderMobileSubNav(courseId) {
   // UPDATED: Full list of 10 items for the Teacher role
   const tabs = currentUser.role === 'teacher' 
     ? [
-        { id: 'tc-modules', icon: '📦', label: 'Modules', fn: 'tcLoadModules' },
-        { id: 'tc-assignments', icon: '✏️', label: 'Assignments', fn: 'tcLoadAssignments' },
-        { id: 'tc-discussions', icon: '💬', label: 'Discussions', fn: 'tcLoadDiscussions' },
-        { id: 'tc-announcements', icon: '📢', label: 'Announcements', fn: 'tcLoadAnnouncements' },
-        { id: 'tc-gradebook', icon: '📊', label: 'Gradebook', fn: 'tcLoadGradebook' },
-        { id: 'tc-quizzes', icon: '📝', label: 'Quizzes', fn: 'tcLoadQuizzes' },
-        { id: 'tc-rubrics', icon: '🏷️', label: 'Rubrics', fn: 'tcLoadRubrics' },
-        { id: 'tc-syllabus', icon: '📋', label: 'Syllabus', fn: 'tcLoadSyllabus' },
-        { id: 'tc-attendance', icon: '📅', label: 'Attendance', fn: 'tcLoadAttendance' },
-        { id: 'tc-students', icon: '👥', label: 'Students', fn: 'tcLoadEnrolledStudents' }
-      ]
-    : [
-        // Students usually have fewer items (7 total)
-        { id: 'sc-modules', icon: '📦', label: 'Modules', fn: 'scLoadModules' },
-        { id: 'sc-assignments', icon: '✏️', label: 'Assignments', fn: 'scLoadAssignments' },
-        { id: 'sc-discussions', icon: '💬', label: 'Discussions', fn: 'scLoadDiscussions' },
-        { id: 'sc-announcements', icon: '📢', label: 'Announcements', fn: 'scLoadAnnouncements' },
-        { id: 'sc-grades', icon: '📊', label: 'Grades', fn: 'scLoadGrades' },
-        { id: 'sc-quizzes', icon: '📝', label: 'Quizzes', fn: 'scLoadQuizzes' },
-        { id: 'sc-syllabus', icon: '📋', label: 'Syllabus', fn: 'scLoadSyllabus' }
-      ];
+  { id: 'tc-modules', icon: '<i class="fas fa-box"></i>', label: 'Modules', fn: 'tcLoadModules' },
+  { id: 'tc-assignments', icon: '<i class="fas fa-pencil-alt"></i>', label: 'Assignments', fn: 'tcLoadAssignments' },
+  { id: 'tc-discussions', icon: '<i class="fas fa-comments"></i>', label: 'Discussions', fn: 'tcLoadDiscussions' },
+  { id: 'tc-announcements', icon: '<i class="fas fa-bullhorn"></i>', label: 'Announcements', fn: 'tcLoadAnnouncements' },
+  { id: 'tc-gradebook', icon: '<i class="fas fa-chart-bar"></i>', label: 'Gradebook', fn: 'tcLoadGradebook' },
+  { id: 'tc-quizzes', icon: '<i class="fas fa-file-alt"></i>', label: 'Quizzes', fn: 'tcLoadQuizzes' },
+  { id: 'tc-rubrics', icon: '<i class="fas fa-tags"></i>', label: 'Rubrics', fn: 'tcLoadRubrics' },
+  { id: 'tc-syllabus', icon: '<i class="fas fa-clipboard"></i>', label: 'Syllabus', fn: 'tcLoadSyllabus' },
+  { id: 'tc-attendance', icon: '<i class="fas fa-calendar-alt"></i>', label: 'Attendance', fn: 'tcLoadAttendance' },
+  { id: 'tc-students', icon: '<i class="fas fa-users"></i>', label: 'Students', fn: 'tcLoadEnrolledStudents' }
+]
+: [
+  // Students usually have fewer items (7 total)
+  { id: 'sc-modules', icon: '<i class="fas fa-box"></i>', label: 'Modules', fn: 'scLoadModules' },
+  { id: 'sc-assignments', icon: '<i class="fas fa-pencil-alt"></i>', label: 'Assignments', fn: 'scLoadAssignments' },
+  { id: 'sc-discussions', icon: '<i class="fas fa-comments"></i>', label: 'Discussions', fn: 'scLoadDiscussions' },
+  { id: 'sc-announcements', icon: '<i class="fas fa-bullhorn"></i>', label: 'Announcements', fn: 'scLoadAnnouncements' },
+  { id: 'sc-grades', icon: '<i class="fas fa-chart-bar"></i>', label: 'Grades', fn: 'scLoadGrades' },
+  { id: 'sc-quizzes', icon: '<i class="fas fa-file-alt"></i>', label: 'Quizzes', fn: 'scLoadQuizzes' },
+  { id: 'sc-syllabus', icon: '<i class="fas fa-clipboard"></i>', label: 'Syllabus', fn: 'scLoadSyllabus' }
+];
 
   subNav.innerHTML = tabs.map(t => `
     <div class="sidebar-sub-item" id="sub-${t.id}" onclick="handleSubNavClick('${t.id}', ${t.fn}, '${t.label}')">
@@ -713,7 +722,7 @@ async function sendAiMessage() {
 async function loadStudentTimetable() {
     setPageTitle('Class Timetable');
     setActiveSidebar('stimetable');
-    setContent('<div class="loading-state"><div class="spinner"></div></div>');
+    setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading LankaLearn...</p></div>');
     
     try {
         const entries = await api('/api/student/timetable');
@@ -748,4 +757,116 @@ async function loadStudentTimetable() {
         setContent(html);
         
     } catch(e) { setContent(`<div class="alert alert-error">Failed to load timetable: ${e.message}</div>`); }
+}
+// ============================================================
+// THEME & AUTO-TRANSLATION ENGINE (User-Specific)
+// ============================================================
+
+window.toggleDarkMode = function() {
+    if (!currentUser) return; 
+    
+    document.body.classList.toggle('dark-mode');
+    const icon = document.getElementById('darkModeIcon');
+    const label = document.getElementById('themeLabel'); // Grabs the new label
+    const isDark = document.body.classList.contains('dark-mode');
+    
+    if (isDark) {
+        icon?.classList.replace('fa-moon', 'fa-sun');
+        if (label) label.textContent = 'Light Mode';
+        localStorage.setItem(`theme_${currentUser.id}`, 'dark');
+    } else {
+        icon?.classList.replace('fa-sun', 'fa-moon');
+        if (label) label.textContent = 'Dark Mode';
+        localStorage.setItem(`theme_${currentUser.id}`, 'light');
+    }
+};
+
+window.changeLanguage = function(lang, event) {
+    if (event) event.stopPropagation(); // Stops the menu from instantly closing incorrectly
+    if (!currentUser) return;
+    localStorage.setItem(`lang_${currentUser.id}`, lang);
+    showToast('Language updated! Refreshing...', 'success');
+    setTimeout(() => { window.location.reload(); }, 600);
+};
+
+// Expanded Dictionary (Added Sidebar Headers)
+const dictionary = {
+    "Dashboard": { si: "පුවරුව", ta: "முகப்பு" },
+    "Users": { si: "පරිශීලකයන්", ta: "பயனர்கள்" },
+    "Courses": { si: "පාඨමාලා", ta: "பாடநெறிகள்" },
+    "Fees": { si: "ගාස්තු", ta: "கட்டணங்கள்" },
+    "System": { si: "පද්ධතිය", ta: "கணினி" },
+    "Calendar": { si: "දින දර්ශනය", ta: "நாள்காட்டி" },
+    "Audit Logs": { si: "විගණන ලොග", ta: "தணிக்கை பதிவுகள்" },
+    "Trash Bin": { si: "කුණු කූඩය", ta: "குப்பை தொட்டி" },
+    "Executive Dash": { si: "විධායක පුවරුව", ta: "நிர்வாக குழு" },
+    "Help & Support": { si: "උදව් සහ සහාය", ta: "உதவி மற்றும் ஆதரவு" },
+    "Sign Out": { si: "පිටවන්න", ta: "வெளியேறு" },
+    "Class Timetable": { si: "පන්ති කාලසටහන", ta: "வகுப்பு நேர அட்டவணை" },
+    "Administration": { si: "පරිපාලනය", ta: "நிர்வாகம்" },
+    "Teaching": { si: "ඉගැන්වීම", ta: "கற்பித்தல்" },
+    "Learning": { si: "ඉගෙනුම", ta: "கற்றல்" },
+    "My Courses": { si: "මගේ පාඨමාලා", ta: "என் பாடநெறிகள்" },
+    "Dark Mode": { si: "අඳුරු තේමාව", ta: "இருண்ட பயன்முறை" },
+    "Light Mode": { si: "ආලෝක තේමාව", ta: "ஒளி பயன்முறை" },
+    "Language": { si: "භාෂාව", ta: "மொழி" },
+    "Teacher Salaries": { si: "ගුරුවරුන්ගේ වැටුප්", ta: "ஆசிரியர் சம்பளம்" },
+    "My Salary": { si: "මගේ වැටුප", ta: "என் சம்பளம்" }
+};
+
+function initializeUserPreferences() {
+    if (!currentUser) return;
+    
+    // 1. Load User's Theme
+    const savedTheme = localStorage.getItem(`theme_${currentUser.id}`);
+    if (savedTheme === 'dark') {
+        document.body.classList.add('dark-mode');
+        document.getElementById('darkModeIcon')?.classList.replace('fa-moon', 'fa-sun');
+    } else {
+        document.body.classList.remove('dark-mode');
+        document.getElementById('darkModeIcon')?.classList.replace('fa-sun', 'fa-moon');
+    }
+    
+    // 2. Load User's Language
+    // 2. Load User's Language & Update Custom UI
+    const lang = localStorage.getItem(`lang_${currentUser.id}`) || 'en';
+    
+    // Set the display text of the custom dropdown
+    const langMap = {
+        'en': 'English (EN)',
+        'si': 'සිංහල (SI)',
+        'ta': 'தமிழ் (TA)'
+    };
+    const currentLangLabel = document.getElementById('currentLangLabel');
+    if (currentLangLabel && langMap[lang]) {
+        currentLangLabel.textContent = langMap[lang];
+    }
+
+    // 3. Translation Engine
+    const translateNode = (node) => {
+        const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, null, false);
+        let textNode;
+        while (textNode = walker.nextNode()) {
+            let original = textNode.nodeValue.trim();
+            if (dictionary[original] && dictionary[original][lang]) {
+                textNode.nodeValue = textNode.nodeValue.replace(original, dictionary[original][lang]);
+            }
+        }
+    };
+
+    // Step A: Translate the existing page immediately on load (Catches Sidebar & Header)
+    translateNode(document.body);
+
+    // Step B: Watch for future dynamic clicks and page loads
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            mutation.addedNodes.forEach((node) => {
+                if (node.nodeType === 1) { 
+                    translateNode(node);
+                }
+            });
+        });
+    });
+    
+    observer.observe(document.body, { childList: true, subtree: true });
 }

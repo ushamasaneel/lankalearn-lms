@@ -14,7 +14,7 @@
 async function loadAdminDashboard() {
   setPageTitle('Dashboard');
   setActiveSidebar('dash');
-  setContent('<div class="loading-state"><div class="spinner"></div></div>');
+  setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading LankaLearn...</p></div>');
 
   const stats = await api('/api/admin/stats').catch(() => ({}));
   const users = await api('/api/admin/users').catch(() => []);
@@ -98,7 +98,7 @@ async function loadAdminDashboard() {
 async function loadExecutiveDashboard() {
     setPageTitle('Executive Dashboard');
     setActiveSidebar('exec');
-    setContent('<div class="loading-state"><div class="spinner"></div></div>');
+    setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading LankaLearn...</p></div>');
     
     const data = await api('/api/admin/executive-dashboard');
     const fmt = n => `LKR ${Number(n).toLocaleString('en-LK')}`;
@@ -259,7 +259,7 @@ setContent(`
 async function loadAuditLogs() {
   setPageTitle('System Audit Logs');
   setActiveSidebar('logs');
-  setContent('<div class="loading-state"><div class="spinner"></div></div>');
+  setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading LankaLearn...</p></div>');
 
   const logs = await api('/api/admin/logs').catch(() => []);
   window._allLogs = logs;
@@ -448,7 +448,7 @@ async function loadAdminUsers(activeTab) {
   }
   setPageTitle('Users');
   setActiveSidebar('users');
-  setContent('<div class="loading-state"><div class="spinner"></div></div>');
+  setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading LankaLearn...</p></div>');
   
   const users = await api('/api/admin/users');
   window._adminUsers = users;
@@ -737,7 +737,7 @@ function showEditUser(id, roleLabel) {
 async function loadAdminCourses() {
   setPageTitle('Courses');
   setActiveSidebar('courses');
-  setContent('<div class="loading-state"><div class="spinner"></div></div>');
+  setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading LankaLearn...</p></div>');
 
   const [courses, teachers] = await Promise.all([api('/api/admin/courses'), api('/api/admin/teachers')]);
   window._adminCourses = courses; 
@@ -966,7 +966,7 @@ async function manageEnrollments(courseId, courseName) {
 async function loadAdminFees() {
   setPageTitle('Fee Management');
   setActiveSidebar('fees');
-  setContent('<div class="loading-state"><div class="spinner"></div></div>');
+  setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading LankaLearn...</p></div>');
   
   const [users, gradeFees] = await Promise.all([
     api('/api/admin/users'),
@@ -1831,7 +1831,7 @@ window.clearActiveBroadcast = async () => {
 async function loadAdminFees() {
   setPageTitle('Fee Management');
   setActiveSidebar('fees');
-  setContent('<div class="loading-state"><div class="spinner"></div></div>');
+  setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading LankaLearn...</p></div>');
   
   const [users, gradeFees, allPayments] = await Promise.all([
     api('/api/admin/users'),
@@ -2138,7 +2138,7 @@ window.openPaymentPortal = async (sid, name) => {
 async function loadTrashBin(activeTab = 'trash-users') {
   setPageTitle('Trash Bin');
   setActiveSidebar('trash');
-  setContent('<div class="loading-state"><div class="spinner"></div></div>');
+  setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading LankaLearn...</p></div>');
 
   const trash = await api('/api/admin/trash');
 
@@ -2153,7 +2153,8 @@ async function loadTrashBin(activeTab = 'trash-users') {
     <div class="tabs">
       <button class="tab-btn active" onclick="switchTab(this,'trash-users')"><i class="fas fa-users"></i>&nbsp; Users (${trash.users.length})</button>
       <button class="tab-btn" onclick="switchTab(this,'trash-courses')"><i class="fas fa-book-open"></i>&nbsp; Courses (${trash.courses.length})</button>
-      <button class="tab-btn" onclick="switchTab(this,'trash-fees')"><i class="fas fa-coins"></i>&nbsp;Fees (${trash.fees.length})</button>
+      <button class="tab-btn" onclick="switchTab(this,'trash-fees')"><i class="fas fa-coins"></i>&nbsp;Student Fees (${trash.fees.length})</button>
+      <button class="tab-btn" onclick="switchTab(this,'trash-tsalaries')"><i class="fas fa-file-invoice-dollar"></i>&nbsp;Teacher Salaries (${trash.teacher_salaries.length})</button>
     </div>
 
     <div id="trash-users" class="tab-panel card" style="display:block">
@@ -2209,7 +2210,30 @@ async function loadTrashBin(activeTab = 'trash-users') {
         </table>
       </div>
     </div>
+
+    <div id="trash-tsalaries" class="tab-panel card" style="display:none">
+      <div class="table-wrapper">
+        <table style="width:100%; font-size:13px;">
+          <thead style="background:#f8fafc;"><tr><th>Teacher</th><th>Month</th><th>Amount</th><th style="text-align:right">Action</th></tr></thead>
+          <tbody>
+            ${trash.teacher_salaries.map(s => `<tr>
+              <td><strong>${escHtml(s.teacher_name)}</strong></td>
+              <td><span class="badge badge-blue">${s.month}</span></td>
+              <td>LKR ${s.amount.toLocaleString()}</td>
+              <td style="text-align:right;">
+                <button class="btn btn-success btn-xs" onclick="restoreItem('teacher_salary', ${s.id})">♻️ Restore</button>
+                <button class="btn btn-danger btn-xs" onclick="destroyItem('teacher_salary', ${s.id})">💥 Destroy</button>
+              </td>
+            </tr>`).join('') || '<tr><td colspan="4" class="text-center text-muted" style="padding:20px;">No deleted salaries.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
   `);
+
+  // Ensure the requested tab opens cleanly when restoring/destroying items
+  const tabBtn = document.querySelector(`button[onclick*="'${activeTab}'"]`);
+  if (tabBtn) switchTab(tabBtn, activeTab);
 }
 
 window.restoreItem = async (type, id) => {
@@ -2230,7 +2254,6 @@ window.destroyItem = async (type, id) => {
         loadTrashBin(activeTab);
     } catch(e) { showToast(e.message, 'error'); }
 };
-
 // ================================================================
 // TIMETABLE MANAGEMENT
 // ================================================================
@@ -2362,5 +2385,209 @@ window.deleteTimetableSlot = async (id, gradeName) => {
     try {
         await apiDelete(`/api/admin/timetable/${id}`);
         manageClassTimetable(gradeName); // Refresh the view
+    } catch(e) { showToast(e.message, 'error'); }
+};
+
+
+// ================================================================
+// TEACHER SALARY MANAGEMENT (ADMIN)
+// ================================================================
+
+async function loadTeacherSalaries() {
+    setPageTitle('Teacher Salaries');
+    setActiveSidebar('tsalaries');
+    setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading LankaLearn...</p></div>');
+    
+    // Fetch users and filter teachers
+    const users = await api('/api/admin/users').catch(() => []);
+    const teachers = users.filter(u => u.role === 'teacher');
+    
+    setContent(`
+      <div class="page-header">
+        <h1><i class="fas fa-file-invoice-dollar" style="color:var(--primary-dark);"></i> Teacher Salaries</h1>
+        <p>Manage payroll, view history, and issue payslips for teaching staff.</p>
+      </div>
+  
+      <div class="card">
+        <div class="card-header" style="background:#fafafa;">
+          <span class="card-title">Teaching Staff Payroll Directory</span>
+          <input type="text" id="salaryTeacherSearch" class="search-box" style="float:right;" placeholder="🔍 Search teacher..." oninput="filterSalaryTeachers()">
+        </div>
+        <div class="table-wrapper">
+          <table id="salaryTeachersTable">
+            <thead><tr><th>Teacher Name</th><th>Username</th><th>Contact</th><th>Actions</th></tr></thead>
+            <tbody>
+              ${teachers.map(t => `
+                <tr class="salary-teacher-row">
+                  <td class="st-name"><strong>${escHtml(t.full_name)}</strong></td>
+                  <td><code>${escHtml(t.username)}</code></td>
+                  <td>${escHtml(t.phone || '—')}</td>
+                  <td><button class="btn btn-success btn-sm" onclick="viewTeacherSalary(${t.id}, '${escHtml(t.full_name)}')"><i class="fas fa-money-check-alt"></i> Manage Payroll</button></td>
+                </tr>
+              `).join('')}
+              ${!teachers.length ? '<tr><td colspan="4" class="text-center text-muted" style="padding:20px;">No teachers found in the system.</td></tr>' : ''}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `);
+
+    window.filterSalaryTeachers = () => {
+        const q = document.getElementById('salaryTeacherSearch').value.toLowerCase();
+        document.querySelectorAll('.salary-teacher-row').forEach(row => {
+            row.style.display = row.querySelector('.st-name').textContent.toLowerCase().includes(q) ? '' : 'none';
+        });
+    };
+}
+
+window.viewTeacherSalary = async (teacherId, teacherName) => {
+    openModal(`Payroll Dashboard — ${teacherName}`, '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
+    
+    const history = await api(`/api/admin/teachers/${teacherId}/salary`).catch(() => []);
+    window._currentTeacherSalaryHistory = history; // Store for the edit form
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const today = new Date().toISOString().split('T')[0];
+
+    let html = `
+      <div style="background:#f8fafc; border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:24px;">
+        <h4 style="margin-top:0; margin-bottom:16px; color:var(--primary-dark);">Issue New Salary Payment</h4>
+        <div class="form-row form-row-3">
+          <div class="form-group"><label>Salary Month</label><input type="month" id="salMonth" class="form-control" value="${currentMonth}"></div>
+          <div class="form-group"><label>Payment Date</label><input type="date" id="salDate" class="form-control" value="${today}"></div>
+          <div class="form-group"><label>Payment Method</label>
+            <select id="salMethod" class="form-control" onchange="document.getElementById('salRef').placeholder = this.value === 'Cheque' ? 'Cheque Number' : 'Transaction ID / Notes'">
+              <option value="Bank Transfer">Bank Transfer</option><option value="Cheque">Cheque</option><option value="Cash">Cash</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row form-row-3">
+          <div class="form-group"><label>Basic Salary (LKR)</label><input type="number" id="salBasic" class="form-control" value="0" oninput="calculateNetSalary()"></div>
+          <div class="form-group"><label>Allowances/Bonus (LKR)</label><input type="number" id="salAllow" class="form-control" value="0" oninput="calculateNetSalary()"></div>
+          <div class="form-group"><label>Deductions (LKR)</label><input type="number" id="salDeduct" class="form-control" value="0" oninput="calculateNetSalary()"></div>
+        </div>
+        <div class="form-row form-row-2" style="align-items:flex-end;">
+          <div class="form-group" style="margin:0;"><label>Reference / Cheque Number</label><input type="text" id="salRef" class="form-control" placeholder="Transaction ID / Notes"></div>
+          <div style="background:#dbeafe; padding:10px 16px; border-radius:8px; border:1px solid #93c5fd; display:flex; justify-content:space-between; align-items:center;">
+             <span style="font-weight:700; color:#1e40af; font-size:12px; text-transform:uppercase;">Net Payable:</span>
+             <span id="salNetDisplay" style="font-size:20px; font-weight:800; color:#1e3a8a;">LKR 0</span>
+          </div>
+        </div>
+        <button class="btn btn-primary w-full mt-16" onclick="submitTeacherSalary(${teacherId}, '${escHtml(teacherName)}')"><i class="fas fa-check-circle"></i> Record & Issue Payslip</button>
+      </div>
+
+      <h4 style="margin-bottom:12px;">Payment History</h4>
+      <div class="table-wrapper">
+        <table style="width:100%; font-size:13px;">
+          <thead>
+            <tr style="background:#f8fafc;">
+              <th>Month</th><th>Date & Method</th><th>Breakdown</th><th style="text-align:right;">Net Paid</th><th style="text-align:center;">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${history.map(h => `
+              <tr>
+                <td><span class="badge badge-blue">📅 ${h.month}</span></td>
+                <td>${h.paid_date}<br><span class="text-muted text-sm">${h.method} (${escHtml(h.reference || 'N/A')})</span></td>
+                <td style="font-size:11px; color:var(--text-muted);">Basic: ${h.basic.toLocaleString()}<br>+ Allw: ${h.allowances.toLocaleString()}<br>- Ded: ${h.deductions.toLocaleString()}</td>
+                <td style="text-align:right;"><strong>LKR ${h.net_paid.toLocaleString()}</strong></td>
+                <td style="text-align:center;">
+                  <button class="btn btn-secondary btn-xs" onclick="printPayslip('${escHtml(teacherName)}', '${h.month}', ${h.basic}, ${h.allowances}, ${h.deductions}, ${h.net_paid})" title="Print">🖨️</button>
+                  <button class="btn btn-primary btn-xs" onclick="editTeacherSalary(${h.id}, ${teacherId}, '${escHtml(teacherName)}')">✏️ Edit</button>
+                  <button class="btn btn-danger btn-xs" onclick="deleteTeacherSalary(${h.id}, ${teacherId}, '${escHtml(teacherName)}', '${h.month}')">✕</button>
+                </td>
+              </tr>
+            `).join('')}
+            ${!history.length ? '<tr><td colspan="5" class="text-center text-muted" style="padding:15px;">No salary records found.</td></tr>' : ''}
+          </tbody>
+        </table>
+      </div>
+    `;
+    document.getElementById('modalBody').innerHTML = html;
+};
+
+// Add these two new functions right underneath calculateNetSalary
+window.editTeacherSalary = (salaryId, teacherId, teacherName) => {
+    const record = window._currentTeacherSalaryHistory.find(h => h.id === salaryId);
+    if (!record) return;
+
+    openModal(`Edit Salary — ${teacherName} (${record.month})`, modalForm([
+        { label: 'Payment Date', name: 'paid_date', type: 'date', value: record.paid_date, required: true },
+        { label: 'Payment Method', name: 'method', type: 'select', value: record.method, options: [
+            {value: 'Bank Transfer', label: 'Bank Transfer'}, {value: 'Cheque', label: 'Cheque'}, {value: 'Cash', label: 'Cash'}
+        ]},
+        { label: 'Reference / Cheque Number', name: 'reference', value: record.reference || '' },
+        { label: 'Basic Salary (LKR)', name: 'basic', type: 'number', value: record.basic, required: true },
+        { label: 'Allowances (LKR)', name: 'allowances', type: 'number', value: record.allowances, required: true },
+        { label: 'Deductions (LKR)', name: 'deductions', type: 'number', value: record.deductions, required: true }
+    ], async (fd) => {
+        const basic = parseFloat(fd.get('basic')) || 0;
+        const allow = parseFloat(fd.get('allowances')) || 0;
+        const deduct = parseFloat(fd.get('deductions')) || 0;
+        const net = basic + allow - deduct;
+
+        const payload = {
+            paid_date: fd.get('paid_date'),
+            method: fd.get('method'),
+            reference: fd.get('reference'),
+            basic: basic, allowances: allow, deductions: deduct, net_paid: net
+        };
+
+        try {
+            await fetch(`/api/admin/teachers/salary/${salaryId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            showToast('Salary updated successfully!', 'success');
+            closeModal();
+            viewTeacherSalary(teacherId, teacherName); // Refresh UI
+        } catch(e) { showToast(e.message, 'error'); }
+    }, 'Update Salary'));
+};
+
+window.deleteTeacherSalary = async (salaryId, teacherId, teacherName, month) => {
+    if (!confirm(`Are you sure you want to permanently delete the salary record for ${month}?`)) return;
+    try {
+        await apiDelete(`/api/admin/teachers/salary/${salaryId}`);
+        showToast('Salary record deleted.', 'success');
+        viewTeacherSalary(teacherId, teacherName); // Refresh UI
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+window.calculateNetSalary = () => {
+    const basic = parseFloat(document.getElementById('salBasic').value) || 0;
+    const allow = parseFloat(document.getElementById('salAllow').value) || 0;
+    const deduct = parseFloat(document.getElementById('salDeduct').value) || 0;
+    const net = basic + allow - deduct;
+    
+    document.getElementById('salNetDisplay').textContent = `LKR ${net.toLocaleString()}`;
+    if (net < 0) {
+        document.getElementById('salNetDisplay').style.color = '#dc2626'; // Red if negative
+    } else {
+        document.getElementById('salNetDisplay').style.color = '#1e3a8a';
+    }
+};
+
+window.submitTeacherSalary = async (teacherId, teacherName) => {
+    const basic = parseFloat(document.getElementById('salBasic').value) || 0;
+    const net = basic + (parseFloat(document.getElementById('salAllow').value) || 0) - (parseFloat(document.getElementById('salDeduct').value) || 0);
+    
+    if (net <= 0) return showToast("Net payable amount must be greater than 0.", "error");
+
+    const payload = {
+        month: document.getElementById('salMonth').value,
+        paid_date: document.getElementById('salDate').value,
+        method: document.getElementById('salMethod').value,
+        reference: document.getElementById('salRef').value,
+        basic: basic,
+        allowances: parseFloat(document.getElementById('salAllow').value) || 0,
+        deductions: parseFloat(document.getElementById('salDeduct').value) || 0,
+        net_paid: net
+    };
+
+    try {
+        await apiJSON(`/api/admin/teachers/${teacherId}/salary`, payload);
+        showToast('Salary payment recorded successfully!', 'success');
+        viewTeacherSalary(teacherId, teacherName); // Refresh Modal
     } catch(e) { showToast(e.message, 'error'); }
 };

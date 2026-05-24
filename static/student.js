@@ -5,7 +5,7 @@
 async function loadStudentDashboard() {
   setPageTitle('Dashboard');
   setActiveSidebar('sdash');
-  setContent('<div class="loading-state"><div class="spinner"></div></div>');
+  setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading LankaLearn...</p></div>');
 
   const data = await api('/api/student/dashboard').catch(() => ({ courses:[], upcoming:[], grades:[] }));
 
@@ -19,7 +19,7 @@ async function loadStudentDashboard() {
   const upcomingHtml = data.upcoming.length ? data.upcoming.map(a => {
     const due = daysUntil(a.due_date);
     return `<div class="upcoming-item">
-      <div class="upcoming-type-icon" style="background:#dbeafe">✏️</div>
+      <div class="upcoming-type-icon" style="background:#dbeafe"><i class="fas fa-edit"></i>&nbsp;</div>
       <div style="flex:1">
         <div style="font-size:13.5px;font-weight:600">${escHtml(a.title)}</div>
         <div class="text-sm text-muted">${escHtml(a.course_name)}</div>
@@ -28,39 +28,39 @@ async function loadStudentDashboard() {
         ${due ? `<span class="badge ${due.cls}">${due.label}</span>` : fmtDate(a.due_date)}
       </div>
     </div>`;
-  }).join('') : emptyState('📅', 'No upcoming assignments');
+  }).join('') : emptyState('<i class="fas fa-calendar-alt"></i>&nbsp;', 'No upcoming assignments');
 
   const recentGradesHtml = data.grades.slice(0, 5).map(g => {
     const pct = Math.round(g.grade / g.points * 100);
     const cls = gradeColor(pct);
     return `<div class="upcoming-item">
-      <div class="upcoming-type-icon" style="background:#dcfce7">📊</div>
+      <div class="upcoming-type-icon" style="background:#dcfce7"><i class="fas fa-chart-bar"></i>&nbsp;</div>
       <div style="flex:1">
         <div class="text-sm text-muted">${escHtml(g.course_name)}</div>
       </div>
       <span class="${cls}" style="font-weight:700">${pct}%</span>
     </div>`;
-  }).join('') || emptyState('📊', 'No grades yet');
+  }).join('') || emptyState('<i class="fas fa-chart-bar"></i>&nbsp;', 'No grades yet');
 
   setContent(`
     <div class="page-header">
-      <h1>👋 Welcome, ${escHtml(currentUser.full_name)}</h1>
+      <h1><i class="fas fa-user-circle"></i> Welcome, ${escHtml(currentUser.full_name)}</h1>
       <p>You are enrolled in ${data.courses.length} course${data.courses.length !== 1 ? 's' : ''} this term.</p>
     </div>
 
     <div class="stat-grid">
       <div class="stat-card">
-        <div class="stat-icon">📚</div>
+        <div class="stat-icon"><i class="fas fa-book"></i>&nbsp;</div>
         <div class="stat-value">${data.courses.length}</div>
         <div class="stat-label">Enrolled Courses</div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon">✏️</div>
+        <div class="stat-icon"><i class="fas fa-edit"></i>&nbsp;</div>
         <div class="stat-value">${data.upcoming.length}</div>
         <div class="stat-label">Upcoming Assignments</div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon">📊</div>
+        <div class="stat-icon"><i class="fas fa-chart-bar"></i>&nbsp;</div>
         <div class="stat-value">${avgPct !== null ? avgPct + '%' : '—'}</div>
         <div class="stat-label">Average Grade</div>
       </div>
@@ -68,11 +68,11 @@ async function loadStudentDashboard() {
 
     <div class="form-row form-row-2">
       <div class="card">
-        <div class="card-header"><span class="card-title">📅 Upcoming Due Dates</span></div>
+        <div class="card-header"><span class="card-title"><i class="fas fa-calendar-alt"></i>&nbsp; Upcoming Due Dates</span></div>
         <div class="card-body">${upcomingHtml}</div>
       </div>
       <div class="card">
-        <div class="card-header"><span class="card-title">📊 Recent Grades</span></div>
+        <div class="card-header"><span class="card-title"><i class="fas fa-chart-bar"></i>&nbsp; Recent Grades</span></div>
         <div class="card-body">${recentGradesHtml}</div>
       </div>
     </div>
@@ -86,7 +86,7 @@ async function loadStudentDashboard() {
             <div class="course-card-code">${escHtml(c.code)}</div>
             <div class="course-card-name">${escHtml(c.name)}</div>
             <div class="course-card-footer">
-              <div class="course-card-teacher">👨‍🏫 ${escHtml(c.teacher_name)}</div>
+              <div class="course-card-teacher"><i class="fas fa-chalkboard-teacher"></i>&nbsp; ${escHtml(c.teacher_name)}</div>
               <span class="badge badge-blue">Open →</span>
             </div>
           </div>
@@ -113,13 +113,13 @@ async function renderStudentCourse(courseId) {
       </div>
     </div>
     <nav class="course-nav">
-      <button class="course-nav-btn active" onclick="scSwitchTab(this,'sc-modules')">📦 Modules</button>
-      <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-assignments')">✏️ Assignments</button>
-      <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-discussions')">💬 Discussions</button>
-      <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-announcements')">📢 Announcements</button>
-      <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-grades')">📊 Grades</button>
-      <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-quizzes')">📝 Quizzes</button>
-      <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-syllabus')">📋 Syllabus</button>
+      <button class="course-nav-btn active" onclick="scSwitchTab(this,'sc-modules')"><i class="fas fa-box"></i>&nbsp; Modules</button>
+      <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-assignments')"><i class="fas fa-edit"></i>&nbsp; Assignments</button>
+      <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-discussions')"><i class="fas fa-comments"></i>&nbsp; Discussions</button>
+      <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-announcements')"><i class="fas fa-bullhorn"></i>&nbsp; Announcements</button>
+      <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-grades')"><i class="fas fa-chart-bar"></i>&nbsp; Grades</button>
+      <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-quizzes')"><i class="fas fa-notes-medical"></i>&nbsp; Quizzes</button>
+      <button class="course-nav-btn" onclick="scSwitchTab(this,'sc-syllabus')"><i class="fas fa-clipboard"></i>&nbsp; Syllabus</button>
     </nav>
     <div id="sc-modules" class="sc-panel"></div>
     <div id="sc-assignments" class="sc-panel" style="display:none"></div>
@@ -157,7 +157,7 @@ async function scLoadModules() {
   panel.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
   const modules = await api(`/api/courses/${_scCourseId}/modules`);
 
-  if (!modules.length) { panel.innerHTML = emptyState('📦', 'No modules available yet.'); return; }
+  if (!modules.length) { panel.innerHTML = emptyState('<i class="fas fa-box"></i>&nbsp;', 'No modules available yet.'); return; }
 
   panel.innerHTML = modules.map(mod => {
     const items = mod.items || [];
@@ -191,7 +191,7 @@ function toggleScModule(id, chevId) {
 }
 
 function scRenderModuleItem(item) {
-  const icon = TYPE_ICONS[item.type] || '📎';
+  const icon = TYPE_ICONS[item.type] || '<i class="fas fa-paperclip"></i>&nbsp;';
   const meta = item.meta || {};
   let metaStr = '';
   if (meta.due_date) metaStr = `Due: ${fmtDate(meta.due_date)}`;
@@ -228,7 +228,7 @@ async function scViewMaterial(materialId) {
       if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) {
           fileHtml = `<div style="margin-top:16px; text-align:center;"><img src="${url}" style="max-width:100%; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.1)"></div>`;
       } else {
-          fileHtml = `<div class="alert alert-info mt-16">📎 <strong>Attached file:</strong> <a href="${url}" target="_blank">${escHtml(m.file_name)}</a></div>`;
+          fileHtml = `<div class="alert alert-info mt-16"><i class="fas fa-paperclip"></i>&nbsp; <strong>Attached file:</strong> <a href="${url}" target="_blank">${escHtml(m.file_name)}</a></div>`;
       }
   }
 
@@ -251,9 +251,9 @@ async function scViewQuiz(quizId) {
   const q = quizzes.find(x => x.id === quizId);
   if (!q) return;
   openModal(q.title, `
-    <div class="alert alert-info mb-16">📅 Due: ${fmtDate(q.due_date)}</div>
+    <div class="alert alert-info mb-16"><i class="fas fa-calendar-alt"></i>&nbsp; Due: ${fmtDate(q.due_date)}</div>
     <div class="rich-content">${escHtml(q.description || 'No description.')}</div>
-    <div class="alert alert-warn mt-16">⚠️ Online quiz submission is not yet available. Please submit your answers in class or as directed by your teacher.</div>
+    <div class="alert alert-warn mt-16"><i class="fas fa-exclamation-triangle"></i>&nbsp; Online quiz submission is not yet available. Please submit your answers in class or as directed by your teacher.</div>
   `);
 }
 
@@ -263,7 +263,7 @@ async function scLoadAssignments() {
   if (!panel) return;
   panel.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
   const assignments = await api(`/api/courses/${_scCourseId}/assignments`);
-  if (!assignments.length) { panel.innerHTML = emptyState('✏️', 'No assignments yet.'); return; }
+  if (!assignments.length) { panel.innerHTML = emptyState('<i class="fas fa-edit"></i>&nbsp;', 'No assignments yet.'); return; }
 
   panel.innerHTML = assignments.map(a => {
     const sub = a.submission;
@@ -278,7 +278,7 @@ async function scLoadAssignments() {
     <div class="card mb-16">
       <div class="card-header">
         <div>
-          <div class="card-title">✏️ ${escHtml(a.title)}</div>
+          <div class="card-title"><i class="fas fa-edit"></i>&nbsp; ${escHtml(a.title)}</div>
           <div class="text-sm text-muted mt-8">${a.points} pts · ${fmtDate(a.due_date)} ${due ? `<span class="badge ${due.cls}">${due.label}</span>` : ''}</div>
         </div>
         ${statusBadge}
@@ -286,7 +286,7 @@ async function scLoadAssignments() {
       <div class="card-body">
         <p style="font-size:13.5px;color:var(--text-muted);margin-bottom:16px">${escHtml(a.description || '')}</p>
         <button class="btn btn-primary btn-sm" onclick="scOpenAssignment(${a.id})">
-          ${sub ? '📋 View / Resubmit' : '📤 Submit Assignment'}
+          ${sub ? '<i class="fas fa-clipboard"></i>&nbsp; View / Resubmit' : '<i class="fas fa-upload"></i>&nbsp; Submit Assignment'}
         </button>
       </div>
     </div>`;
@@ -308,7 +308,7 @@ async function scLoadMaterials() {
       </div>
       <div class="card-body">
         <p style="font-size:13.5px;color:var(--text-muted);margin-bottom:16px">${escHtml(m.content || '')}</p>
-        ${m.file_name ? `<p style="margin-bottom:16px"><strong>📎 Attached file:</strong> <a href="/uploads/${encodeURIComponent(m.file_name)}" target="_blank" class="link">Download/View File</a></p>` : ''}
+        ${m.file_name ? `<p style="margin-bottom:16px"><strong><i class="fas fa-paperclip"></i>&nbsp; Attached file:</strong> <a href="/uploads/${encodeURIComponent(m.file_name)}" target="_blank" class="link">Download/View File</a></p>` : ''}
         <div class="text-xs text-muted">Added ${fmtDate(m.created_at)}</div>
       </div>
     </div>
@@ -322,7 +322,7 @@ async function scLoadQuizzes() {
   if (!panel) return;
   panel.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
   const quizzes = await api(`/api/courses/${_scCourseId}/quizzes`);
-  if (!quizzes.length) { panel.innerHTML = emptyState('📝', 'No quizzes available yet.'); return; }
+  if (!quizzes.length) { panel.innerHTML = emptyState('<i class="fas fa-notes-medical"></i>&nbsp;', 'No quizzes available yet.'); return; }
 
   panel.innerHTML = quizzes.map(q => {
     const sub = q.submission;
@@ -341,14 +341,14 @@ async function scLoadQuizzes() {
     return `
     <div class="card mb-16">
       <div class="card-header">
-        <div class="card-title">📝 ${escHtml(q.title)}</div>
+        <div class="card-title"><i class="fas fa-notes-medical"></i>&nbsp; ${escHtml(q.title)}</div>
         <div class="text-sm text-muted mt-8">${fmtDate(q.due_date)}</div>
       </div>
       <div class="card-body">
         <p style="font-size:13.5px;color:var(--text-muted);margin-bottom:8px">${escHtml(q.description || '')}</p>
         ${statusHtml}
         <button class="btn ${outOfTries ? 'btn-secondary' : 'btn-primary'} btn-sm" ${outOfTries ? 'disabled' : `onclick="scOpenQuiz(${q.id})"`}>
-          ${outOfTries ? '🔒 Max Attempts Reached' : '📝 Take Quiz'}
+          ${outOfTries ? '🔒 Max Attempts Reached' : '<i class="fas fa-notes-medical"></i>&nbsp; Take Quiz'}
         </button>
       </div>
     </div>`;
@@ -370,14 +370,14 @@ async function scOpenAssignment(assignmentId) {
   `;
 
   if (a.file_name) {
-    html += `<div class="alert alert-info mb-16">📎 Assignment file: <a href="/uploads/${encodeURIComponent(a.file_name)}" target="_blank">${escHtml(a.file_name)}</a></div>`;
+    html += `<div class="alert alert-info mb-16"><i class="fas fa-paperclip"></i>&nbsp; Assignment file: <a href="/uploads/${encodeURIComponent(a.file_name)}" target="_blank">${escHtml(a.file_name)}</a></div>`;
   }
 
   if (mySub) {
     html += `
       <div class="alert alert-success mb-16">
         ✅ Submitted on ${fmtDateTime(mySub.submitted_at)}
-        ${mySub.file_name ? `<br>📎 <a href="/uploads/${encodeURIComponent(mySub.file_name)}" target="_blank">View Uploaded Work</a>` : ''}
+        ${mySub.file_name ? `<br><i class="fas fa-paperclip"></i>&nbsp; <a href="/uploads/${encodeURIComponent(mySub.file_name)}" target="_blank">View Uploaded Work</a>` : ''}
       </div>
     `;
   }
@@ -390,7 +390,7 @@ async function scOpenAssignment(assignmentId) {
       <div class="form-group"><label>Upload File (PDF/Photo)</label>
         <input class="form-control" type="file" id="subFileReal">
       </div>
-      <button class="btn btn-primary" onclick="scSubmitAssignment(${assignmentId})">📤 ${mySub ? 'Update' : 'Submit'}</button>
+      <button class="btn btn-primary" onclick="scSubmitAssignment(${assignmentId})"><i class="fas fa-upload"></i>&nbsp; ${mySub ? 'Update' : 'Submit'}</button>
     </div>`;
 
   openModal(`${a?.title}`, html, 'modal-box-lg');
@@ -452,7 +452,7 @@ async function scOpenQuiz(quizId) {
   // The Start Screen!
   let introHtml = `
     <div style="text-align:center; padding: 30px 10px;">
-        <div style="font-size:54px; margin-bottom:16px;">📝</div>
+        <div style="font-size:54px; margin-bottom:16px;"><i class="fas fa-notes-medical"></i>&nbsp;</div>
         <h2 style="margin-bottom:8px; font-family:'Playfair Display', serif; color:var(--primary-dark)">${escHtml(quiz.title)}</h2>
         <p class="text-muted" style="margin-bottom:32px; font-size:15px;">${escHtml(quiz.description || 'Read the questions carefully before submitting.')}</p>
 
@@ -500,7 +500,7 @@ window.scStartQuizTaking = async (quizId, timeLimit) => {
         <h3 style="margin:0">${escHtml(quiz.title)}</h3>
         <p class="text-muted text-sm" style="margin:4px 0 0 0">${questions.length} Questions</p>
       </div>
-      ${timeLimit > 0 ? `<div id="quizTimerDisplay" style="font-size:18px; font-weight:800; color:#dc2626; background:#fee2e2; padding:8px 16px; border-radius:8px; border:1px solid #fca5a5; font-family:monospace; box-shadow:0 2px 4px rgba(220,38,38,0.2);">⏱️ ${timeLimit}:00</div>` : '<div class="badge badge-gray">No Time Limit</div>'}
+      ${timeLimit > 0 ? `<div id="quizTimerDisplay" style="font-size:18px; font-weight:800; color:#dc2626; background:#fee2e2; padding:8px 16px; border-radius:8px; border:1px solid #fca5a5; font-family:monospace; box-shadow:0 2px 4px rgba(220,38,38,0.2);"><i class="fas fa-stopwatch"></i>&nbsp; ${timeLimit}:00</div>` : '<div class="badge badge-gray">No Time Limit</div>'}
     </div>
     <form id="quizForm">`;
 
@@ -514,7 +514,7 @@ window.scStartQuizTaking = async (quizId, timeLimit) => {
     });
     html += `</div></div>`;
   });
-  html += `<button type="button" class="btn btn-primary w-full" style="padding:14px; font-size:16px; font-weight:700; margin-top:8px;" onclick="scSubmitQuiz(${quizId})">📤 Submit Answers</button></form>`;
+  html += `<button type="button" class="btn btn-primary w-full" style="padding:14px; font-size:16px; font-weight:700; margin-top:8px;" onclick="scSubmitQuiz(${quizId})"><i class="fas fa-upload"></i>&nbsp; Submit Answers</button></form>`;
 
   openModal('', html, 'modal-box-lg');
 
@@ -527,11 +527,11 @@ window.scStartQuizTaking = async (quizId, timeLimit) => {
       timeLeft--;
       const m = Math.floor(timeLeft / 60).toString().padStart(2, '0');
       const s = (timeLeft % 60).toString().padStart(2, '0');
-      if (display) display.innerHTML = `⏱️ ${m}:${s}`;
+      if (display) display.innerHTML = `<i class="fas fa-stopwatch"></i>&nbsp; ${m}:${s}`;
 
       if (timeLeft <= 0) {
         clearInterval(_quizTimerInterval);
-        if(display) display.innerHTML = `⏱️ 00:00`;
+        if(display) display.innerHTML = `<i class="fas fa-stopwatch"></i>&nbsp; 00:00`;
         showToast('Time is up! Auto-submitting quiz...', 'error');
         scSubmitQuiz(quizId);
       }
@@ -556,7 +556,7 @@ window.scSubmitQuiz = async (quizId) => {
   } catch (e) {
       showToast(e.message, 'error');
       const btn = document.querySelector('#quizForm .btn-primary');
-      if (btn) { btn.innerHTML = '📤 Submit Answers'; btn.disabled = false; }
+      if (btn) { btn.innerHTML = '<i class="fas fa-upload"></i>&nbsp; Submit Answers'; btn.disabled = false; }
   }
 }
 // ---- Discussions ----
@@ -566,20 +566,20 @@ async function scLoadDiscussions() {
   panel.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
   const discussions = await api(`/api/courses/${_scCourseId}/discussions`);
 
-  if (!discussions.length) { panel.innerHTML = emptyState('💬', 'No discussions yet.'); return; }
+  if (!discussions.length) { panel.innerHTML = emptyState('<i class="fas fa-comments"></i>&nbsp;', 'No discussions yet.'); return; }
 
   panel.innerHTML = discussions.map(d => `
     <div class="card mb-12">
       <div class="card-header">
         <div>
-          <div class="card-title">💬 ${escHtml(d.title)}</div>
+          <div class="card-title"><i class="fas fa-comments"></i>&nbsp; ${escHtml(d.title)}</div>
           <div class="text-sm text-muted mt-8">${d.due_date ? `Due: ${fmtDate(d.due_date)}` : 'No due date'}</div>
         </div>
         <button class="btn btn-primary btn-sm" onclick="scOpenDiscussion(${d.id})">Join Discussion</button>
       </div>
       <div class="card-body">
         <p style="font-size:13.5px;color:var(--text-muted)">${escHtml(d.prompt || '')}</p>
-        ${d.file_name ? `<p style="margin-top:8px"><strong>📎 Attached file:</strong> <a href="/uploads/${encodeURIComponent(d.file_name)}" target="_blank" class="link">Download/View File</a></p>` : ''}
+        ${d.file_name ? `<p style="margin-top:8px"><strong><i class="fas fa-paperclip"></i>&nbsp; Attached file:</strong> <a href="/uploads/${encodeURIComponent(d.file_name)}" target="_blank" class="link">Download/View File</a></p>` : ''}
       </div>
     </div>`).join('');
 }
@@ -597,7 +597,7 @@ async function scOpenDiscussion(discId) {
     const myPost = p.author_id === currentUser.id;
     html += `<div class="discussion-post">
       <div style="display:flex;align-items:center;gap:8px">
-        <span class="post-author">${myPost ? '⭐ ' : ''}👤 ${escHtml(p.author_name)}</span>
+        <span class="post-author">${myPost ? '<i class="fas fa-star"></i>&nbsp; ' : ''}<i class="fas fa-user"></i>&nbsp; ${escHtml(p.author_name)}</span>
         <span class="post-time">${fmtDateTime(p.created_at)}</span>
       </div>
       <div class="post-body">${escHtml(p.body)}</div>
@@ -613,24 +613,24 @@ async function scOpenDiscussion(discId) {
     replies.filter(r => r.parent_id === p.id).forEach(r => {
       const myReply = r.author_id === currentUser.id;
       html += `<div class="discussion-post reply">
-        <span class="post-author">${myReply ? '⭐ ' : ''}↳ ${escHtml(r.author_name)}</span>
+        <span class="post-author">${myReply ? '<i class="fas fa-star"></i>&nbsp; ' : ''}↳ ${escHtml(r.author_name)}</span>
         <span class="post-time">${fmtDateTime(r.created_at)}</span>
         <div class="post-body">${escHtml(r.body)}</div>
       </div>`;
     });
   });
 
-  if (!posts.length) html += emptyState('💬', 'No posts yet. Be the first to reply!');
+  if (!posts.length) html += emptyState('<i class="fas fa-comments"></i>&nbsp;', 'No posts yet. Be the first to reply!');
 
   // New top-level post
   html += `<div style="border-top:1px solid var(--border);padding-top:16px;margin-top:16px">
     <div class="form-group"><label>Post a Response</label>
       <textarea class="form-control" id="newDiscPost" style="min-height:90px" placeholder="Share your thoughts…"></textarea>
     </div>
-    <button class="btn btn-primary btn-sm" onclick="scPostToDiscussion(${discId})">📤 Post</button>
+    <button class="btn btn-primary btn-sm" onclick="scPostToDiscussion(${discId})"><i class="fas fa-upload"></i>&nbsp; Post</button>
   </div>`;
 
-  openModal(`💬 ${disc.title}`, html, 'modal-box-lg');
+  openModal(`<i class="fas fa-comments"></i>&nbsp; ${disc.title}`, html, 'modal-box-lg');
 }
 
 function scToggleReply(id) {
@@ -667,15 +667,15 @@ async function scLoadAnnouncements() {
   panel.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
   const anns = await api(`/api/courses/${_scCourseId}/announcements`);
 
-  if (!anns.length) { panel.innerHTML = emptyState('📢', 'No announcements yet.'); return; }
+  if (!anns.length) { panel.innerHTML = emptyState('<i class="fas fa-bullhorn"></i>&nbsp;', 'No announcements yet.'); return; }
 
   panel.innerHTML = `<div class="card">
     ${anns.map(a => `
       <div class="announcement-item">
-        <div class="ann-title">📢 ${escHtml(a.title)}</div>
+        <div class="ann-title"><i class="fas fa-bullhorn"></i>&nbsp; ${escHtml(a.title)}</div>
         <div class="ann-meta">By ${escHtml(a.author_name)} · ${fmtDateTime(a.created_at)}</div>
         <div class="ann-body">${escHtml(a.body || '')}</div>
-        ${a.file_name ? `<div style="margin-top:8px"><strong>📎 Attachment:</strong> <a href="/uploads/${encodeURIComponent(a.file_name)}" target="_blank" class="link">${escHtml(a.file_name)}</a></div>` : ''}
+        ${a.file_name ? `<div style="margin-top:8px"><strong><i class="fas fa-paperclip"></i>&nbsp; Attachment:</strong> <a href="/uploads/${encodeURIComponent(a.file_name)}" target="_blank" class="link">${escHtml(a.file_name)}</a></div>` : ''}
       </div>`).join('')}
   </div>`;
 }
@@ -715,7 +715,7 @@ async function scLoadGrades() {
     </div>`;
   }
 
-  html += `<div class="card"><div class="card-header"><span class="card-title">📊 Grades</span></div><div class="table-wrapper">
+  html += `<div class="card"><div class="card-header"><span class="card-title"><i class="fas fa-chart-bar"></i>&nbsp; Grades</span></div><div class="table-wrapper">
     <table><thead><tr><th>Type</th><th>Item Name</th><th>Due</th><th>Points</th><th>Grade</th></tr></thead><tbody>`;
   
   // Render Assignments
@@ -754,12 +754,12 @@ async function scLoadSyllabus() {
       if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) {
           fileHtml = `<div style="margin-top:20px"><img src="${url}" style="max-width:100%; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.1)"></div>`;
       } else {
-          fileHtml = `<div class="alert alert-info mt-16">📎 <strong>Attached Syllabus:</strong> <a href="${url}" target="_blank">Download File</a></div>`;
+          fileHtml = `<div class="alert alert-info mt-16"><i class="fas fa-paperclip"></i>&nbsp; <strong>Attached Syllabus:</strong> <a href="${url}" target="_blank">Download File</a></div>`;
       }
   }
 
   panel.innerHTML = `<div class="card">
-    <div class="card-header"><span class="card-title">📋 Syllabus</span></div>
+    <div class="card-header"><span class="card-title"><i class="fas fa-clipboard"></i>&nbsp; Syllabus</span></div>
     <div class="card-body">
       <div class="syllabus-content">${content || '<p class="text-muted">Syllabus not yet published by the teacher.</p>'}</div>
       ${fileHtml}
@@ -773,7 +773,7 @@ async function scLoadSyllabus() {
 async function loadStudentFees() {
   setPageTitle('My Fees');
   setActiveSidebar('sfees');
-  setContent('<div class="loading-state"><div class="spinner"></div></div>');
+  setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading LankaLearn...</p></div>');
   
   const data = await api('/api/student/fees').catch(() => null);
   if (!data) { setContent('<p class="text-muted">Error loading fees.</p>'); return; }
@@ -784,8 +784,8 @@ async function loadStudentFees() {
 
   setContent(`
     <div class="page-header page-header-row">
-      <div><h1>💰 My Fee Statement</h1><p>View your payment history and current rates.</p></div>
-      <button class="btn btn-primary" onclick="printMyFeeStatement()">🖨️ Print Statement</button>
+      <div><h1><i class="fas fa-money-bill-wave"></i>&nbsp; My Fee Statement</h1><p>View your payment history and current rates.</p></div>
+      <button class="btn btn-primary" onclick="printMyFeeStatement()"><i class="fas fa-print"></i>&nbsp; Print Statement</button>
     </div>
     
     <div class="stat-grid" style="margin-bottom:24px">

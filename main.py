@@ -243,6 +243,20 @@ CREATE TABLE IF NOT EXISTS class_details (
     teacher_id INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS teacher_salaries (
+    id SERIAL PRIMARY KEY,
+    teacher_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    month TEXT NOT NULL,
+    paid_date TEXT NOT NULL,
+    method TEXT NOT NULL,
+    reference TEXT,
+    basic REAL DEFAULT 0.0,
+    allowances REAL DEFAULT 0.0,
+    deductions REAL DEFAULT 0.0,
+    net_paid REAL DEFAULT 0.0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 
 CREATE TABLE IF NOT EXISTS attendance (
     id SERIAL PRIMARY KEY,
@@ -685,7 +699,7 @@ def seed(db):
     # ========================================================
     # FOOLPROOF ISOLATED COLUMN CREATOR
     # ========================================================
-    for t in ['users', 'courses', 'student_fee_payments']:
+    for t in ['users', 'courses', 'student_fee_payments', 'teacher_salaries']:
         try:
             with db.cursor() as cur:
                 cur.execute(f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;")
@@ -941,6 +955,77 @@ def get_student_report_card(sid: int, user=Depends(require_role("admin", "super_
     finally:
         DB_POOL.putconn(db)
 
+
+
+# ================================================================
+# TEACHER SALARY ROUTES
+# ================================================================
+
+@app.get("/api/admin/teachers/{teacher_id}/salary")
+def get_teacher_salary(teacher_id: int, user=Depends(require_role("admin", "super_admin", "sub_admin"))):
+    """Fetch the salary history for a specific teacher."""
+    return query("SELECT * FROM teacher_salaries WHERE teacher_id=? AND is_deleted=FALSE ORDER BY month DESC", (teacher_id,))
+
+@app.post("/api/admin/teachers/{teacher_id}/salary")
+async def record_teacher_salary(teacher_id: int, request: Request, user=Depends(require_role("admin", "super_admin"))):
+    """Record a new salary payment for a teacher."""
+    data = await request.json()
+    
+    execute("""
+        INSERT INTO teacher_salaries(teacher_id, month, paid_date, method, reference, basic, allowances, deductions, net_paid)
+        VALUES(?,?,?,?,?,?,?,?,?)
+    """, (teacher_id, data.get("month"), data.get("paid_date"), data.get("method"), 
+          data.get("reference"), data.get("basic", 0), data.get("allowances", 0), 
+          data.get("deductions", 0), data.get("net_paid", 0)))
+    
+    # Log it
+    teacher = query("SELECT full_name FROM users WHERE id=?", (teacher_id,), one=True)
+    t_name = teacher["full_name"] if teacher else f"ID {teacher_id}"
+    log_audit(user["id"], "Paid Teacher Salary", f"Teacher: {t_name} | Month: {data.get('month')} | Net: LKR {data.get('net_paid')}")
+    
+    return {"ok": True}
+
+@app.get("/api/teacher/my-salary")
+def get_my_salary(user=Depends(require_role("teacher"))):
+    """Allow logged-in teachers to view their own salary history."""
+    return query("SELECT * FROM teacher_salaries WHERE teacher_id=? AND is_deleted=FALSE ORDER BY month DESC", (user["id"],))
+
+
+
+@app.put("/api/admin/teachers/salary/{salary_id}")
+async def update_teacher_salary(salary_id: int, request: Request, user=Depends(require_role("admin", "super_admin", "sub_admin"))):
+    data = await request.json()
+    
+    record = query("SELECT teacher_id, month FROM teacher_salaries WHERE id=?", (salary_id,), one=True)
+    if not record: raise HTTPException(404, "Record not found")
+    
+    teacher = query("SELECT full_name FROM users WHERE id=?", (record['teacher_id'],), one=True)
+    t_name = teacher['full_name'] if teacher else "Unknown"
+
+    execute("""
+        UPDATE teacher_salaries 
+        SET paid_date=?, method=?, reference=?, basic=?, allowances=?, deductions=?, net_paid=?
+        WHERE id=?
+    """, (data.get("paid_date"), data.get("method"), data.get("reference"), 
+          data.get("basic", 0), data.get("allowances", 0), data.get("deductions", 0), 
+          data.get("net_paid", 0), salary_id))
+    
+    log_audit(user["id"], "Edited Teacher Salary", f"Teacher: {t_name} | Month: {record['month']} | New Net: LKR {data.get('net_paid')}")
+    return {"ok": True}
+
+@app.delete("/api/admin/teachers/salary/{salary_id}")
+def delete_teacher_salary(salary_id: int, user=Depends(require_role("admin", "super_admin", "sub_admin"))):
+    record = query("SELECT teacher_id, month, net_paid FROM teacher_salaries WHERE id=?", (salary_id,), one=True)
+    if not record: raise HTTPException(404, "Record not found")
+    
+    teacher = query("SELECT full_name FROM users WHERE id=?", (record['teacher_id'],), one=True)
+    t_name = teacher['full_name'] if teacher else "Unknown"
+
+    # SOFT DELETE
+    execute("UPDATE teacher_salaries SET is_deleted=TRUE WHERE id=?", (salary_id,))
+    
+    log_audit(user["id"], "Soft Deleted Teacher Salary", f"Teacher: {t_name} | Month: {record['month']} | Amount: LKR {record['net_paid']}")
+    return {"ok": True}
 # ================================================================
 # FEE MANAGEMENT ENDPOINTS
 # ================================================================
@@ -1411,7 +1496,10 @@ def get_trash(user=Depends(require_role("admin", "super_admin"))):
         "courses": query("SELECT id, code, name FROM courses WHERE is_deleted=TRUE ORDER BY name"),
         "fees": query("""SELECT p.id, p.amount, p.payment_type, p.paid_date, u.full_name as student_name 
                          FROM student_fee_payments p JOIN users u ON p.student_id=u.id 
-                         WHERE p.is_deleted=TRUE ORDER BY p.paid_date DESC""")
+                         WHERE p.is_deleted=TRUE ORDER BY p.paid_date DESC"""),
+        "teacher_salaries": query("""SELECT s.id, s.month, s.net_paid as amount, s.paid_date, u.full_name as teacher_name
+                                     FROM teacher_salaries s JOIN users u ON s.teacher_id=u.id
+                                     WHERE s.is_deleted=TRUE ORDER BY s.paid_date DESC""")
     }
 
 @app.post("/api/admin/trash/restore")
@@ -1422,7 +1510,6 @@ async def restore_trash(request: Request, user=Depends(require_role("admin", "su
     
     db = get_db()
     try:
-        # 1. Fetch the exact name BEFORE restoring
         item_name = f"ID {item_id}"
         with db.cursor() as cur:
             if item_type == "user":
@@ -1439,17 +1526,21 @@ async def restore_trash(request: Request, user=Depends(require_role("admin", "su
                 if f:
                     cur.execute("SELECT full_name FROM users WHERE id=%s", (f[1],))
                     stu = cur.fetchone()
-                    stu_name = stu[0] if stu else 'Unknown'
-                    item_name = f"LKR {f[0]} payment for {stu_name}"
+                    item_name = f"LKR {f[0]} payment for {stu[0] if stu else 'Unknown'}"
+            elif item_type == "teacher_salary":
+                cur.execute("SELECT net_paid, teacher_id, month FROM teacher_salaries WHERE id=%s", (item_id,))
+                f = cur.fetchone()
+                if f:
+                    cur.execute("SELECT full_name FROM users WHERE id=%s", (f[1],))
+                    t = cur.fetchone()
+                    item_name = f"LKR {f[0]} salary ({f[2]}) for {t[0] if t else 'Unknown'}"
 
-        # 2. Restore the item
-        table = "users" if item_type == "user" else "courses" if item_type == "course" else "student_fee_payments"
+        table = "users" if item_type == "user" else "courses" if item_type == "course" else "student_fee_payments" if item_type == "fee" else "teacher_salaries"
         with db.cursor() as cur:
             cur.execute(f"UPDATE {table} SET is_deleted=FALSE WHERE id=%s", (item_id,))
         db.commit()
         
-        # 3. Log with human-readable names!
-        log_audit(user["id"], f"Restored {item_type.title()}", f"Restored: {item_name}")
+        log_audit(user["id"], f"Restored {item_type.replace('_', ' ').title()}", f"Restored: {item_name}")
         return {"ok": True}
     except Exception as e:
         db.rollback()
@@ -1465,7 +1556,6 @@ async def permanent_delete_trash(request: Request, user=Depends(require_role("su
     
     db = get_db()
     try:
-        # 1. Fetch the exact name BEFORE destroying
         item_name = f"ID {item_id}"
         with db.cursor() as cur:
             if item_type == "user":
@@ -1482,19 +1572,26 @@ async def permanent_delete_trash(request: Request, user=Depends(require_role("su
                 if f:
                     cur.execute("SELECT full_name FROM users WHERE id=%s", (f[1],))
                     stu = cur.fetchone()
-                    stu_name = stu[0] if stu else 'Unknown'
-                    item_name = f"LKR {f[0]} payment for {stu_name}"
+                    item_name = f"LKR {f[0]} payment for {stu[0] if stu else 'Unknown'}"
+            elif item_type == "teacher_salary":
+                cur.execute("SELECT net_paid, teacher_id, month FROM teacher_salaries WHERE id=%s", (item_id,))
+                f = cur.fetchone()
+                if f:
+                    cur.execute("SELECT full_name FROM users WHERE id=%s", (f[1],))
+                    t = cur.fetchone()
+                    item_name = f"LKR {f[0]} salary ({f[2]}) for {t[0] if t else 'Unknown'}"
 
-            # 2. Perform the destructive deletions
             if item_type == "user":
                 cur.execute("DELETE FROM enrollments WHERE student_id=%s", (item_id,))
                 cur.execute("DELETE FROM attendance WHERE student_id=%s", (item_id,))
                 cur.execute("DELETE FROM quiz_submissions WHERE student_id=%s", (item_id,))
                 cur.execute("DELETE FROM submissions WHERE student_id=%s", (item_id,))
                 cur.execute("DELETE FROM student_fee_payments WHERE student_id=%s", (item_id,))
+                cur.execute("DELETE FROM teacher_salaries WHERE teacher_id=%s", (item_id,))
                 cur.execute("UPDATE courses SET teacher_id=NULL WHERE teacher_id=%s", (item_id,))
                 cur.execute("DELETE FROM users WHERE id=%s", (item_id,))
             elif item_type == "course":
+                # (Keep all your existing course deletion logic here)
                 cur.execute("DELETE FROM enrollments WHERE course_id=%s", (item_id,))
                 cur.execute("DELETE FROM attendance WHERE course_id=%s", (item_id,))
                 cur.execute("DELETE FROM syllabus WHERE course_id=%s", (item_id,))
@@ -1518,10 +1615,11 @@ async def permanent_delete_trash(request: Request, user=Depends(require_role("su
                 cur.execute("DELETE FROM courses WHERE id=%s", (item_id,))
             elif item_type == "fee":
                 cur.execute("DELETE FROM student_fee_payments WHERE id=%s", (item_id,))
+            elif item_type == "teacher_salary":
+                cur.execute("DELETE FROM teacher_salaries WHERE id=%s", (item_id,))
         db.commit()
         
-        # 3. Log with human-readable names!
-        log_audit(user["id"], f"Permanently Deleted {item_type.title()}", f"Destroyed: {item_name}")
+        log_audit(user["id"], f"Permanently Deleted {item_type.replace('_', ' ').title()}", f"Destroyed: {item_name}")
         return {"ok": True}
     except Exception as e:
         db.rollback()
@@ -1537,7 +1635,7 @@ async def permanent_delete_trash(request: Request, user=Depends(require_role("su
 # TIMETABLE API
 # ================================================================
 
-@app.get("/api/classes/{grade_name}/timetable")
+@app.get("/api/classes/{grade_name:path}/timetable")
 def get_class_timetable(grade_name: str, user=Depends(require_user)):
     """Fetches the timetable and available courses for a specific grade."""
     db = get_db()
@@ -1556,7 +1654,7 @@ def get_class_timetable(grade_name: str, user=Depends(require_user)):
     finally:
         DB_POOL.putconn(db)
 
-@app.post("/api/admin/classes/{grade_name}/timetable")
+@app.post("/api/admin/classes/{grade_name:path}/timetable")
 async def add_timetable_slot(grade_name: str, request: Request, user=Depends(require_role("admin", "super_admin", "sub_admin"))):
     data = await request.json()
     execute("""
@@ -2469,7 +2567,7 @@ def fix_database():
     # ========================================================
     # BLOCK 1: FOOLPROOF SOFT DELETE COLUMNS
     # ========================================================
-    for t in ['users', 'courses', 'student_fee_payments']:
+    for t in ['users', 'courses', 'student_fee_payments', 'teacher_salaries']:
         try:
             with db.cursor() as cur:
                 cur.execute(f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;")

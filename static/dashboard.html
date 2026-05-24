@@ -40,7 +40,7 @@
   <div class="header-left">
     <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleMobileSidebar()">☰</button>
     <div class="brand">
-      <span class="brand-icon-small">🎓</span>
+      <span class="brand-icon-small"><i class="fas fa-graduation-cap"></i></span>
       <span class="brand-text">LankaLearn</span>
     </div>
     <div class="page-title-area">
@@ -48,13 +48,13 @@
     </div>
   </div>
   
-  <div class="header-right">
+  <div class="header-right" style="gap: 12px;">
     <div class="header-user" onclick="this.classList.toggle('active')">
       <div class="user-avatar" id="userAvatar"></div>
       <div class="user-info">
-  <div class="user-name" id="userName"></div>
-  <div class="user-role" id="userRole" style="display: none;"></div>
-</div>
+        <div class="user-name" id="userName"></div>
+        <div class="user-role" id="userRole" style="display: none;"></div>
+      </div>
       <div class="user-dropdown">
         <div class="dropdown-item" onclick="logout()">🚪 Sign Out</div>
       </div>
@@ -67,6 +67,25 @@
 
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-section" id="sidebarNav"></div>
+    
+    <div class="sidebar-footer">
+      <div class="sidebar-item" onclick="toggleDarkMode()">
+        <i class="fas fa-moon si-icon" id="darkModeIcon"></i> 
+        <span id="themeLabel" style="flex: 1;">Dark Mode</span>
+      </div>
+      
+      <div class="sidebar-item lang-selector" onclick="this.classList.toggle('active')" style="position: relative; overflow: visible;">
+        <i class="fas fa-globe si-icon"></i>
+        <span id="currentLangLabel" style="flex: 1; font-size: 13.5px; font-weight: 600;">English (EN)</span>
+        <i class="fas fa-chevron-up" style="font-size: 10px; color: var(--text-light);"></i>
+
+        <div class="lang-dropdown">
+          <div class="lang-item" onclick="changeLanguage('en', event)">English (EN)</div>
+          <div class="lang-item" onclick="changeLanguage('si', event)">සිංහල (SI)</div>
+          <div class="lang-item" onclick="changeLanguage('ta', event)">தமிழ் (TA)</div>
+        </div>
+      </div>
+    </div>
   </nav>
 
   <main class="main-content" id="mainContent">
@@ -88,10 +107,10 @@
 <!-- Toast -->
 <div class="toast-container" id="toastContainer"></div>
 
-<script src="/static/utils.js?v=3"></script>
-<script src="/static/app.js?v=3"></script>
-<script src="/static/admin.js?v=3"></script>
-<script src="/static/teacher.js?v=3"></script>
-<script src="/static/student.js?v=3"></script>
+<script src="/static/utils.js?v=4"></script>
+<script src="/static/app.js?v=4"></script>
+<script src="/static/admin.js?v=4"></script>
+<script src="/static/teacher.js?v=4"></script>
+<script src="/static/student.js?v=4"></script>
 </body>
 </html>

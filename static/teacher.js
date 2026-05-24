@@ -5,7 +5,7 @@
 async function loadTeacherDashboard() {
   setPageTitle('Dashboard');
   setActiveSidebar('tdash');
-  setContent('<div class="loading-state"><div class="spinner"></div></div>');
+  setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading LankaLearn...</p></div>');
 
   const courses = await api('/api/teacher/courses').catch(() => []);
 
@@ -66,17 +66,17 @@ async function renderTeacherCourse(courseId) {
       </div>
     </div>
     <nav class="course-nav">
-      <button class="course-nav-btn active" onclick="tcSwitchTab(this,'tc-modules')">📦 Modules</button>
-      <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-assignments')">✏️ Assignments</button>
-      <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-discussions')">💬 Discussions</button>
-      <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-announcements')">📢 Announcements</button>
-      <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-gradebook')">📊 Gradebook</button>
-      <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-quizzes')">📝 Quizzes</button>
-      <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-rubrics')">🏷️ Rubrics</button>
-      <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-syllabus')">📋 Syllabus</button>
-      <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-attendance')">📅 Attendance</button>
-      <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-students')">👥 Students</button>
-    </nav>
+  <button class="course-nav-btn active" onclick="tcSwitchTab(this,'tc-modules')"><i class="fas fa-box"></i> Modules</button>
+  <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-assignments')"><i class="fas fa-pencil-alt"></i> Assignments</button>
+  <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-discussions')"><i class="fas fa-comments"></i> Discussions</button>
+  <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-announcements')"><i class="fas fa-bullhorn"></i> Announcements</button>
+  <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-gradebook')"><i class="fas fa-chart-bar"></i> Gradebook</button>
+  <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-quizzes')"><i class="fas fa-file-alt"></i> Quizzes</button>
+  <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-rubrics')"><i class="fas fa-tags"></i> Rubrics</button>
+  <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-syllabus')"><i class="fas fa-clipboard"></i> Syllabus</button>
+  <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-attendance')"><i class="fas fa-calendar-alt"></i> Attendance</button>
+  <button class="course-nav-btn" onclick="tcSwitchTab(this,'tc-students')"><i class="fas fa-users"></i> Students</button>
+</nav>
     <div id="tc-modules" class="tc-panel"></div>
     <div id="tc-assignments" class="tc-panel" style="display:none"></div>
     <div id="tc-discussions" class="tc-panel" style="display:none"></div>
@@ -1205,3 +1205,107 @@ async function tcLoadEnrolledStudents() {
     showToast('Failed to load students', 'error');
   }
 }
+
+
+// ================================================================
+// TEACHER PERSONAL SALARY VIEW
+// ================================================================
+
+async function loadTeacherSalaryView() {
+    setPageTitle('My Salary');
+    setActiveSidebar('msalary');
+    setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading LankaLearn...</p></div>');
+    
+    // Fetch personal salary history
+    const history = await api('/api/teacher/my-salary').catch(() => []);
+    
+    let totalEarned = history.reduce((sum, h) => sum + h.net_paid, 0);
+
+    setContent(`
+      <div class="page-header">
+        <h1><i class="fas fa-file-invoice-dollar" style="color:var(--primary-dark);"></i> My Salary Statements</h1>
+        <p>View your payment history and download official payslips.</p>
+      </div>
+
+      <div class="stat-grid" style="margin-bottom:24px">
+        <div class="stat-card" style="background:#f8fafc;">
+          <div class="stat-label">Total Earnings (All Time)</div>
+          <div class="stat-value" style="color:var(--success)">LKR ${totalEarned.toLocaleString()}</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">Payment History</span></div>
+        <div class="table-wrapper">
+          <table style="width:100%; font-size:13px;">
+            <thead>
+              <tr style="background:#f8fafc;">
+                <th>Month</th>
+                <th>Date Paid</th>
+                <th>Payment Method</th>
+                <th style="text-align:right;">Net Amount</th>
+                <th style="text-align:center;">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${history.map(h => `
+                <tr>
+                  <td><span class="badge badge-blue">📅 ${h.month}</span></td>
+                  <td>${h.paid_date}</td>
+                  <td>${h.method} <span class="text-muted text-sm">(${escHtml(h.reference || 'N/A')})</span></td>
+                  <td style="text-align:right;"><strong>LKR ${h.net_paid.toLocaleString()}</strong></td>
+                  <td style="text-align:center;">
+                    <button class="btn btn-secondary btn-sm" onclick="printPayslip('${escHtml(currentUser.full_name)}', '${h.month}', ${h.basic}, ${h.allowances}, ${h.deductions}, ${h.net_paid})">🖨️ Payslip</button>
+                  </td>
+                </tr>
+              `).join('')}
+              ${!history.length ? '<tr><td colspan="5" class="text-center text-muted" style="padding:20px;">No salary records found.</td></tr>' : ''}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `);
+}
+
+// Global Payslip Printer (Used by both Admin and Teacher)
+window.printPayslip = (teacherName, month, basic, allow, deduct, net) => {
+    const win = window.open('', '_blank');
+    const today = new Date().toLocaleDateString('en-LK');
+    
+    // Format numbers cleanly
+    const fmt = n => Number(n).toLocaleString('en-LK', { minimumFractionDigits: 2 });
+
+    win.document.write(`
+      <html><head><title>Payslip - ${teacherName} - ${month}</title>
+      <style>
+          body { font-family: 'Arial', sans-serif; padding: 40px; color: #000; }
+          .payslip-box { border: 1px solid #000; padding: 30px; max-width: 500px; margin: 0 auto; }
+          .school-name { text-align: center; font-size: 22px; font-weight: bold; margin-bottom: 5px; color: #1e3a8a; }
+          .header-title { text-align: center; text-decoration: underline; margin-bottom: 30px; }
+          .row { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 14px; }
+          .row span:first-child { font-weight: bold; }
+          hr { border-top: 1px dashed #ccc; margin: 20px 0; }
+      </style>
+      </head><body>
+      <div class="payslip-box">
+          <div class="school-name">Wesswood International College</div>
+          <div class="header-title">OFFICIAL PAYSLIP</div>
+          
+          <div class="row"><span>Teacher Name:</span> <span>${teacherName}</span></div>
+          <div class="row"><span>Salary Month:</span> <span>${month}</span></div>
+          <div class="row"><span>Date Issued:</span> <span>${today}</span></div>
+          <hr>
+          <div class="row"><span>Basic Salary:</span> <span>LKR ${fmt(basic)}</span></div>
+          <div class="row"><span>Allowances:</span> <span>LKR ${fmt(allow)}</span></div>
+          <div class="row" style="color:red;"><span>Deductions:</span> <span>LKR ${fmt(deduct)}</span></div>
+          <hr>
+          <div class="row" style="font-size: 18px;"><span>Net Payable:</span> <span><strong>LKR ${fmt(net)}</strong></span></div>
+          <hr>
+          <div style="text-align:center; font-size:12px; margin-top:40px; color:#555;">
+              This is a computer-generated payslip and does not require a signature.
+          </div>
+      </div>
+      <script>setTimeout(() => { window.print(); }, 300);</script></body></html>
+    `);
+    win.document.close();
+};
