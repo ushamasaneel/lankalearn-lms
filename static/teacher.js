@@ -1309,3 +1309,80 @@ window.printPayslip = (teacherName, month, basic, allow, deduct, net) => {
     `);
     win.document.close();
 };
+
+
+// ================================================================
+// TEACHER: MY CLASS (ASSIGNED GRADE VIEW)
+// ================================================================
+
+async function loadTeacherClass() {
+    setPageTitle('My Class');
+    setActiveSidebar('myclass');
+    setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading Class Details...</p></div>');
+    
+    try {
+        const data = await api('/api/teacher/my-class');
+        
+        if (!data.assigned) {
+            setContent(`
+                <div class="page-header">
+                    <h1><i class="fas fa-users" style="color:var(--primary-dark);"></i> My Class</h1>
+                </div>
+                <div class="empty-state">
+                    <div class="empty-icon" style="font-size:42px; color:var(--text-light);"><i class="fas fa-users-slash"></i></div>
+                    <p>You have not been assigned as a Class Teacher for any grade yet.</p>
+                </div>
+            `);
+            return;
+        }
+
+        setContent(`
+            <div class="page-header page-header-row">
+                <div>
+                    <h1><i class="fas fa-users" style="color:var(--primary-dark);"></i> My Class: ${escHtml(data.grade)}</h1>
+                    <p>You are the assigned class teacher. There are ${data.students.length} student(s) in your class.</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header" style="background:#fafafa;">
+                    <span class="card-title">Student Roster</span>
+                </div>
+                <div class="table-wrapper">
+                    <table style="width:100%; font-size:13.5px; border-collapse:collapse;">
+                        <thead style="background:#f8fafc; border-bottom:2px solid var(--border);">
+                            <tr>
+                                <th style="padding:12px 16px; text-align:left;">Profile</th>
+                                <th style="padding:12px 16px; text-align:left;">Student Name</th>
+                                <th style="padding:12px 16px; text-align:left;">Adm No.</th>
+                                <th style="padding:12px 16px; text-align:left;">Contact</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.students.length ? data.students.map(s => {
+                                const imgUrl = s.profile_image ? `/uploads/${s.profile_image.split('/').map(encodeURIComponent).join('/')}` : '';
+                                const imgHtml = imgUrl ? `<img src="${imgUrl}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">` : `<div class="user-avatar" style="width:40px;height:40px;font-size:16px;">${s.full_name.charAt(0)}</div>`;
+                                return `
+                                <tr style="border-bottom:1px solid #f1f5f9;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                                    <td style="padding:12px 16px; width:60px; text-align:center;">${imgHtml}</td>
+                                    <td style="padding:12px 16px;">
+                                        <strong>${escHtml(s.full_name)}</strong><br>
+                                        <span class="text-muted text-sm">${escHtml(s.username)}</span>
+                                    </td>
+                                    <td style="padding:12px 16px;">
+                                        ${s.admission_number ? `<code class="adm-number">${escHtml(s.admission_number)}</code>` : '<span class="text-muted">—</span>'}
+                                    </td>
+                                    <td style="padding:12px 16px;">
+                                        ${s.phone ? `📞 ${escHtml(s.phone)}` : '<span class="text-muted">No phone</span>'}
+                                    </td>
+                                </tr>`;
+                            }).join('') : '<tr><td colspan="4" class="text-center text-muted" style="padding:30px;">No students are assigned to this grade yet.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `);
+    } catch (e) {
+        setContent(`<div class="alert alert-error">Failed to load class details: ${e.message}</div>`);
+    }
+}

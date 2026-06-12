@@ -35,24 +35,19 @@ async function loadAdminDashboard() {
 
     <div class="stat-grid">
       <div class="stat-card">
-        <div class="stat-icon"><i class="fas fa-users" style="margin:0; color:var(--primary);"></i></div>
-        <div class="stat-value">${stats.users || 0}</div>
-        <div class="stat-label">Total Users</div>
+        <div class="stat-icon"><i class="fas fa-user-graduate" style="margin:0; color:var(--primary);"></i></div>
+        <div class="stat-value">${stats.students || 0}</div>
+        <div class="stat-label">Total Students</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon"><i class="fas fa-chalkboard-teacher" style="margin:0; color:var(--primary);"></i></div>
+        <div class="stat-value">${stats.teachers || 0}</div>
+        <div class="stat-label">Total Teachers</div>
       </div>
       <div class="stat-card">
         <div class="stat-icon"><i class="fas fa-book-open" style="margin:0; color:var(--primary);"></i></div>
         <div class="stat-value">${stats.courses || 0}</div>
-        <div class="stat-label">Courses</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon"><i class="fas fa-graduation-cap" style="margin:0; color:var(--primary);"></i></div>
-        <div class="stat-value">${stats.enrollments || 0}</div>
-        <div class="stat-label">Enrollments</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon"><i class="fas fa-edit" style="margin:0; color:var(--primary);"></i></div>
-        <div class="stat-value">${stats.submissions || 0}</div>
-        <div class="stat-label">Submissions</div>
+        <div class="stat-label">Total Courses</div>
       </div>
     </div>
 

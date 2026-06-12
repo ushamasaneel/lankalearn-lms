@@ -61,7 +61,9 @@ else:
 # DB & General helpers
 # ---------------------------------------------------------------------------
 
-DATABASE_URL = "postgresql://lankalearn1_user:QIkCMALDh9p4gTIkLGtmCzAl3cebZ77Q@dpg-d7mit4hf9bms7381m55g-a.oregon-postgres.render.com/lankalearn1?sslmode=require"
+DATABASE_URL = "postgresql://lankalearn_db_user:MHKrtYjJ37fyKJdxx2oJ1lkbuW46iXo7@dpg-d8krob7avr4c73emn39g-a.oregon-postgres.render.com/lankalearn_db"
+
+
 
 try:
     DB_POOL = psycopg2.pool.SimpleConnectionPool(1, 20, DATABASE_URL)
@@ -838,10 +840,9 @@ def admin_reset_pw(uid: int, user=Depends(require_role("admin", "sub_admin", "su
 @app.get("/api/admin/stats")
 def admin_stats(user=Depends(require_role("admin", "sub_admin", "super_admin"))):
     return {
-        "users":       query("SELECT COUNT(*) as c FROM users")[0]["c"],
-        "courses":     query("SELECT COUNT(*) as c FROM courses")[0]["c"],
-        "enrollments": query("SELECT COUNT(*) as c FROM enrollments")[0]["c"],
-        "submissions": query("SELECT COUNT(*) as c FROM submissions")[0]["c"],
+        "students": query("SELECT COUNT(*) as c FROM users WHERE role='student' AND is_deleted=FALSE")[0]["c"],
+        "teachers": query("SELECT COUNT(*) as c FROM users WHERE role='teacher' AND is_deleted=FALSE")[0]["c"],
+        "courses":  query("SELECT COUNT(*) as c FROM courses WHERE is_deleted=FALSE")[0]["c"],
     }
 
 @app.get("/api/admin/users")
@@ -1701,6 +1702,32 @@ def teacher_courses(user=Depends(require_role("teacher"))):
         FROM courses c WHERE c.teacher_id=? ORDER BY c.code
     """, (user["id"],))
 
+
+
+@app.get("/api/teacher/my-class")
+def get_my_class(user=Depends(require_role("teacher"))):
+    """Fetches the grade the teacher is assigned to and the students in it."""
+    # Find which grade this teacher is assigned to
+    class_info = query("SELECT grade FROM class_details WHERE teacher_id=?", (user["id"],), one=True)
+    
+    if not class_info:
+        return {"assigned": False, "grade": None, "students": []}
+        
+    grade = class_info["grade"]
+    
+    # Get all students enrolled in this specific grade
+    students = query("""
+        SELECT id, full_name, username, phone, profile_image, admission_number 
+        FROM users 
+        WHERE role='student' AND grade=? AND is_deleted=FALSE
+        ORDER BY full_name
+    """, (grade,))
+    
+    return {
+        "assigned": True, 
+        "grade": grade, 
+        "students": students
+    }
 
 
 # ---------------------------------------------------------------------------

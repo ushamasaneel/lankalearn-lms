@@ -159,6 +159,9 @@ function buildSidebar() {
       <div class="sidebar-item" id="si-tdash" onclick="loadTeacherDashboard(); setActiveSidebar('tdash')">
         <span class="si-icon"><i class="fas fa-home"></i></span> Dashboard
       </div>
+      <div class="sidebar-item" id="si-myclass" onclick="loadTeacherClass(); setActiveSidebar('myclass')">
+        <span class="si-icon"><i class="fas fa-users"></i></span> My Class
+      </div>
       <div class="sidebar-item" id="si-tcal" onclick="loadCalendar(); setActiveSidebar('tcal')">
         <span class="si-icon"><i class="fas fa-calendar-alt"></i></span> Calendar
       </div>
@@ -794,7 +797,7 @@ const dictionary = {
     "Dashboard": { si: "පුවරුව", ta: "முகப்பு" },
     "Users": { si: "පරිශීලකයන්", ta: "பயனர்கள்" },
     "Courses": { si: "පාඨමාලා", ta: "பாடநெறிகள்" },
-    "Fees": { si: "ගාස්තු", ta: "கட்டணங்கள்" },
+    "Student Fees": { si: "ගාස්තු", ta: "கட்டணங்கள்" },
     "System": { si: "පද්ධතිය", ta: "கணினி" },
     "Calendar": { si: "දින දර්ශනය", ta: "நாள்காட்டி" },
     "Audit Logs": { si: "විගණන ලොග", ta: "தணிக்கை பதிவுகள்" },
