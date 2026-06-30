@@ -61,7 +61,7 @@ else:
 # DB & General helpers
 # ---------------------------------------------------------------------------
 
-DATABASE_URL = "postgresql://lankalearn_db_user:MHKrtYjJ37fyKJdxx2oJ1lkbuW46iXo7@dpg-d8krob7avr4c73emn39g-a.oregon-postgres.render.com/lankalearn_db"
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 
@@ -71,7 +71,11 @@ except Exception as e:
     print(f"Failed to create connection pool: {e}")
 
 def get_db():
-    return DB_POOL.getconn()
+    try:
+        return DB_POOL.getconn()
+    except Exception as e:
+        print(f"Error fetching connection from pool: {e}")
+        raise
 
 def query(sql: str, params=(), *, one=False, db=None):
     close = db is None
@@ -721,10 +725,21 @@ def seed(db):
 @app.on_event("startup")
 def startup_event():
     try:
-        init_db()
-        print("Database initialized successfully.")
+        db = get_db()
+        with db.cursor() as cur:
+            # Check for the existence of the core 'users' table
+            cur.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'users');")
+            db_exists = cur.fetchone()[0]
+        DB_POOL.putconn(db)
+        
+        if not db_exists:
+            print("First run detected. Running heavy database initialization...")
+            init_db()
+        else:
+            print("Database already exists. Skipping boot script to load faster.")
+            
     except Exception as e:
-        print(f"Error initializing database: {e}")
+        print(f"Error during startup check: {e}")
 
 # ---------------------------------------------------------------------------
 # Auth helpers
@@ -804,10 +819,37 @@ def logout(response: Response, session_id: Optional[str] = Cookie(default=None))
     return {"ok": True}
 
 @app.get("/api/auth/me")
-def me(user=Depends(require_user)):
+def me(user=Depends(require_user), original_admin_id: Optional[str] = Cookie(default=None)):
     return {"id": user["id"], "username": user["username"],
             "full_name": user["full_name"], "role": user["role"],
-            "must_change_password": user.get("must_change_password", False)}
+            "must_change_password": user.get("must_change_password", False),
+            "is_impersonating": original_admin_id is not None} # <-- Added this flag
+
+@app.post("/api/admin/impersonate/{target_uid}")
+def impersonate(target_uid: int, response: Response, session_id: Optional[str] = Cookie(default=None), user=Depends(require_role("admin", "super_admin"))):
+    target = query("SELECT id, role, full_name FROM users WHERE id=?", (target_uid,), one=True)
+    if not target: raise HTTPException(404, "User not found")
+    if target["role"] in ["admin", "super_admin", "sub_admin"]: 
+        raise HTTPException(403, "Cannot impersonate other administrative staff")
+
+    # Save the original admin ID in a cookie, and swap the current session to the target user
+    response.set_cookie("original_admin_id", str(user["id"]), httponly=True, samesite="lax")
+    SESSIONS[session_id] = target_uid
+    
+    log_audit(user["id"], "Impersonation Started", f"Logged in as {target['full_name']} ({target['role']})")
+    return {"ok": True}
+
+@app.post("/api/auth/revert-impersonation")
+def revert_impersonation(response: Response, session_id: Optional[str] = Cookie(default=None), original_admin_id: Optional[str] = Cookie(default=None)):
+    if not original_admin_id or not session_id:
+        raise HTTPException(400, "No impersonation active")
+
+    admin_id = int(original_admin_id)
+    SESSIONS[session_id] = admin_id
+    response.delete_cookie("original_admin_id")
+    
+    log_audit(admin_id, "Impersonation Ended", "Returned to admin account")
+    return {"ok": True}
 
 
 
@@ -1433,6 +1475,24 @@ async def bulk_delete_users(request: Request, user=Depends(require_role("admin",
     return {"ok": True}
 
 
+@app.post("/api/admin/bulk-promote")
+async def bulk_promote_students(request: Request, user=Depends(require_role("admin", "super_admin"))):
+    data = await request.json()
+    student_ids = [int(i) for i in data.get("student_ids", [])]
+    new_grade = data.get("new_grade", "")
+    
+    if not student_ids or not new_grade: 
+        raise HTTPException(400, "Missing students or target grade")
+        
+    format_strings = ','.join(['?'] * len(student_ids))
+    
+    # Use the same safe batch-execution logic as your bulk deletes
+    execute(f"UPDATE users SET grade=? WHERE id IN ({format_strings})", tuple([new_grade] + student_ids))
+    
+    log_audit(user["id"], "Academic Rollover", f"Promoted {len(student_ids)} students to {new_grade}")
+    return {"ok": True}    
+
+
 @app.post("/api/admin/courses/bulk-delete")
 async def bulk_delete_courses(request: Request, user=Depends(require_role("admin", "super_admin"))):
     data = await request.json()
@@ -1699,7 +1759,7 @@ def teacher_courses(user=Depends(require_role("teacher"))):
     return query("""
         SELECT c.*,
             (SELECT COUNT(*) FROM enrollments WHERE course_id=c.id) as student_count
-        FROM courses c WHERE c.teacher_id=? ORDER BY c.code
+        FROM courses c WHERE c.teacher_id=? AND c.is_deleted=FALSE ORDER BY c.code
     """, (user["id"],))
 
 
@@ -2422,14 +2482,14 @@ def student_dashboard(user=Depends(require_role("student"))):
         SELECT c.id,c.code,c.name,u.full_name as teacher_name
         FROM courses c JOIN enrollments e ON e.course_id=c.id
         JOIN users u ON c.teacher_id=u.id
-        WHERE e.student_id=? ORDER BY c.code
+        WHERE e.student_id=? AND c.is_deleted=FALSE ORDER BY c.code
     """, (user["id"],))
     
     upcoming = query("""
         SELECT a.id,a.title,a.due_date,a.points,c.name as course_name,c.id as course_id
         FROM assignments a JOIN courses c ON a.course_id=c.id
         JOIN enrollments e ON e.course_id=c.id
-        WHERE e.student_id=? AND a.due_date != '' AND a.due_date >= CURRENT_TIMESTAMP::text 
+        WHERE e.student_id=? AND a.due_date != '' AND a.due_date >= CURRENT_TIMESTAMP::text AND c.is_deleted=FALSE
         ORDER BY a.due_date LIMIT 10
     """, (user["id"],))
     
@@ -2437,7 +2497,7 @@ def student_dashboard(user=Depends(require_role("student"))):
         SELECT s.grade, a.points, c.name as course_name
         FROM submissions s JOIN assignments a ON s.assignment_id=a.id
         JOIN courses c ON a.course_id=c.id
-        WHERE s.student_id=? AND s.grade IS NOT NULL
+        WHERE s.student_id=? AND s.grade IS NOT NULL AND c.is_deleted=FALSE
     """, (user["id"],))
     return {"courses": courses, "upcoming": upcoming, "grades": grades}
 
@@ -2448,7 +2508,7 @@ def student_courses(user=Depends(require_role("student"))):
                (SELECT COUNT(*) FROM assignments WHERE course_id=c.id) as assignment_count
         FROM courses c JOIN enrollments e ON e.course_id=c.id
         JOIN users u ON c.teacher_id=u.id
-        WHERE e.student_id=? ORDER BY c.code
+        WHERE e.student_id=? AND c.is_deleted=FALSE ORDER BY c.code
     """, (user["id"],))
 
 # ---------------------------------------------------------------------------
@@ -2853,6 +2913,61 @@ async def bulk_enroll(cid: int, request: Request, user=Depends(require_role("adm
     log_audit(user["id"], "Bulk Enrolled Students", f"Course: {course['name']} | Total Enrolled: {len(data.get('student_ids', []))}")
     return {"ok": True}
 
+
+# --- STUDENT-CENTRIC COURSE MANAGEMENT ---
+@app.get("/api/admin/students/{sid}/courses")
+def get_student_courses_admin(sid: int, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
+    db = get_db()
+    try:
+        enrolled = query("""
+            SELECT c.id, c.code, c.name, c.grade, u.full_name as teacher_name 
+            FROM enrollments e 
+            JOIN courses c ON e.course_id = c.id 
+            LEFT JOIN users u ON c.teacher_id = u.id 
+            WHERE e.student_id=? AND c.is_deleted=FALSE
+            ORDER BY c.name
+        """, (sid,), db=db)
+        
+        enrolled_ids = {c["id"] for c in enrolled}
+        all_courses = query("""
+            SELECT c.id, c.code, c.name, c.grade, u.full_name as teacher_name 
+            FROM courses c 
+            LEFT JOIN users u ON c.teacher_id = u.id 
+            WHERE c.is_deleted=FALSE
+            ORDER BY c.name
+        """, db=db)
+        
+        available = [c for c in all_courses if c["id"] not in enrolled_ids]
+        return {"enrolled": enrolled, "available": available}
+    finally:
+        DB_POOL.putconn(db)
+
+@app.delete("/api/admin/students/{sid}/courses/{cid}/unenroll")
+def admin_unenroll_student_from_course(sid: int, cid: int, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
+    execute("DELETE FROM enrollments WHERE student_id=? AND course_id=?", (sid, cid))
+    student = query("SELECT full_name FROM users WHERE id=?", (sid,), one=True)
+    course = query("SELECT name FROM courses WHERE id=?", (cid,), one=True)
+    log_audit(user["id"], "Unenrolled Student", f"Student: {student['full_name']} | Course: {course['name']}")
+    return {"ok": True}
+
+@app.post("/api/admin/students/{sid}/courses/enroll/bulk")
+async def admin_bulk_enroll_student_courses(sid: int, request: Request, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
+    data = await request.json()
+    student = query("SELECT full_name FROM users WHERE id=?", (sid,), one=True)
+    for cid in data.get("course_ids", []):
+        try: execute("INSERT INTO enrollments(student_id,course_id) VALUES(?,?)", (sid, cid))
+        except IntegrityError: pass
+    log_audit(user["id"], "Bulk Enrolled Student", f"Student: {student['full_name']} | Total Courses: {len(data.get('course_ids', []))}")
+    return {"ok": True}
+
+@app.post("/api/admin/students/{sid}/courses/unenroll/bulk")
+async def admin_bulk_unenroll_student_courses(sid: int, request: Request, user=Depends(require_role("admin", "sub_admin", "super_admin"))):
+    data = await request.json()
+    student = query("SELECT full_name FROM users WHERE id=?", (sid,), one=True)
+    for cid in data.get("course_ids", []):
+        execute("DELETE FROM enrollments WHERE course_id=? AND student_id=?", (cid, sid))
+    log_audit(user["id"], "Bulk Unenrolled Student", f"Student: {student['full_name']} | Total Removed: {len(data.get('course_ids', []))}")
+    return {"ok": True}
 
 @app.get("/api/admin/classes/{grade_name:path}/details")
 def get_class_details(grade_name: str, user=Depends(require_role("admin", "super_admin", "sub_admin"))):

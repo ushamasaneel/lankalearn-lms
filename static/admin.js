@@ -511,9 +511,11 @@ function studentTable(list) {
         <td>
           <div class="flex gap-8 flex-center">
             <button class="btn btn-secondary btn-sm" onclick="showEditUser(${u.id},'student')"><i class="fas fa-edit"></i> Edit</button>
+            <button class="btn btn-secondary btn-sm" style="background:#e0e7ff;color:#1e40af;border:1px solid #bfdbfe;" onclick="window.manageStudentCourses(${u.id}, '${escHtml(u.full_name)}')"><i class="fas fa-book"></i> Courses</button>
             <button class="btn btn-success btn-sm" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;" onclick="window.openPaymentPortal(${u.id},'${escHtml(u.full_name)}')"><i class="fas fa-coins"></i> Fees</button>
+            <button class="btn btn-secondary btn-sm" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;" onclick="impersonateUser(${u.id}, '${escHtml(u.full_name)}')">🎭 Login As</button>
             <button class="btn btn-secondary btn-sm" onclick="window.printUserProfile(${u.id})" title="Print Profile"><i class="fas fa-print"></i></button>
-            <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')"><i class="fas fa-key"></i> Reset PW</button>
+            <button class="btn btn-warning btn-sm" onclick="resetUserPassword(${u.id}, '${escHtml(u.full_name)}')"><i class="fas fa-key"></i></button>
           </div>
         </td>
       </tr>`).join('')}
@@ -572,15 +574,19 @@ setContent(`
               ${gradeFilterOptions}
           </select>
           <div style="flex:1"></div>
+          <button class="btn btn-success btn-sm" onclick="exportToCSV('#tab-students table', 'Student_Directory.csv')"><i class="fas fa-file-excel"></i> Export CSV</button>
           <button class="btn btn-primary btn-sm" onclick="showCreateUser('student')"><i class="fas fa-plus"></i> Create Student</button>
         </div>
         <div class="card-body" style="padding:16px">${studentTable(students)}</div>
       </div>
 
       <div id="tab-classes" class="tab-panel card" style="display:none">
-        <div class="card-header" style="background:#fafafa;">
-          <h3 style="margin:0; font-size:16px;">Class Directory</h3>
-          <p class="text-sm text-muted">Students grouped by Grade Level</p>
+        <div class="card-header" style="background:#fafafa; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <h3 style="margin:0; font-size:16px;">Class Directory</h3>
+            <p class="text-sm text-muted">Students grouped by Grade Level</p>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="showBulkPromoteModal()"><i class="fas fa-graduation-cap"></i> Academic Rollover Tool</button>
         </div>
         <div class="card-body" id="classDirectoryBody"></div>
       </div>
@@ -739,8 +745,12 @@ function showEditUser(id, roleLabel) {
 }
 
 // ================================================================
-// COURSES SECTION (With Filters & Bulk Delete)
+// COURSES SECTION
 // ================================================================
+
+// CHANGED: Default is now 'grouped' so you see it immediately!
+window._courseViewMode = 'grouped'; 
+window._selectedCourseIds = new Set();
 
 async function loadAdminCourses() {
   setPageTitle('Courses');
@@ -748,10 +758,12 @@ async function loadAdminCourses() {
   setContent('<div class="loading-state"><div class="edu-loader"></div><p class="mt-16 text-muted font-bold">Loading LankaLearn...</p></div>');
 
   const [courses, teachers] = await Promise.all([api('/api/admin/courses'), api('/api/admin/teachers')]);
-  window._adminCourses = courses; 
+  window._adminCourses = courses;
   window._adminTeachers = teachers;
+  window._selectedCourseIds.clear(); 
 
   const gradeFilterOptions = GRADE_OPTIONS.map(g => `<option value="${g.value}">${g.label === '— Select Grade (or leave blank) —' ? 'All Grades' : g.label}</option>`).join('');
+  const teacherFilterOptions = '<option value="">All Teachers</option>' + teachers.map(t => `<option value="${t.id}">${escHtml(t.full_name)}</option>`).join('');
 
   setContent(`
     <div class="page-header page-header-row">
@@ -760,15 +772,26 @@ async function loadAdminCourses() {
     </div>
 
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:16px;">
-        <div style="display:flex; gap:10px; align-items:center; background:white; padding:8px 12px; border-radius:8px; border:1px solid var(--border);">
-            <input type="checkbox" onchange="toggleSelectAllCourses(this.checked)" style="transform:scale(1.2); cursor:pointer;" title="Select All Visible">
-            <span style="font-size:13px; font-weight:600;">Select All</span>
+        <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
+            <div style="display:flex; gap:10px; align-items:center; background:white; padding:8px 12px; border-radius:8px; border:1px solid var(--border);">
+                <input type="checkbox" id="chkSelectAllCourses" onchange="toggleSelectAllCourses(this.checked)" style="transform:scale(1.2); cursor:pointer;" title="Select All Visible">
+                <span style="font-size:13px; font-weight:600;">Select All</span>
+            </div>
+            
+            <div style="display:flex; background:#f1f5f9; padding:4px; border-radius:8px; border:1px solid var(--border);">
+                <button id="btnViewFlat" class="btn btn-sm ${window._courseViewMode === 'flat' ? 'btn-primary' : 'btn-secondary'}" style="border:none;" onclick="setCourseViewMode('flat')">Show All Courses</button>
+                <button id="btnViewGroup" class="btn btn-sm ${window._courseViewMode === 'grouped' ? 'btn-primary' : 'btn-secondary'}" style="border:none;" onclick="setCourseViewMode('grouped')">Categorize by Grade</button>
+            </div>
         </div>
-        <div style="display:flex; gap:10px;">
-            <select class="form-control" id="courseGradeFilter" onchange="filterCourses()" style="width:180px; padding:7px 14px;">
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <select class="form-control" id="courseGradeFilter" onchange="renderFilteredCourses()" style="width:160px; padding:7px 14px;">
                 ${gradeFilterOptions}
             </select>
-            <input type="text" class="search-box" id="courseSearch" placeholder="Search courses..." oninput="filterCourses()">
+            <select class="form-control" id="courseTeacherFilter" onchange="renderFilteredCourses()" style="width:160px; padding:7px 14px;">
+                ${teacherFilterOptions}
+            </select>
+            <input type="text" class="search-box" id="courseSearch" placeholder="Search courses..." oninput="renderFilteredCourses()">
         </div>
     </div>
 
@@ -777,198 +800,153 @@ async function loadAdminCourses() {
         <button class="btn btn-danger btn-sm" onclick="bulkDeleteCourses()"><i class="fas fa-trash"></i> Delete Selected Courses</button>
     </div>
 
-    <div class="course-grid" id="adminCourseGrid">
-      ${courses.map((c, i) => `
-        <div class="course-card course-item-card" data-grade="${escHtml(c.grade || '')}" style="position:relative;">
-          <input type="checkbox" class="chk-course" value="${c.id}" onchange="updateCourseBulkBar()" style="position:absolute; top:12px; right:12px; z-index:10; transform:scale(1.4); cursor:pointer;">
-          <div class="course-card-banner ${courseBannerClass(c.id)}"></div>
-          <div class="course-card-body">
+    <div id="adminCourseGridContainer"></div>
+  `);
+
+  renderFilteredCourses();
+}
+
+window.setCourseViewMode = (mode) => {
+    window._courseViewMode = mode;
+    document.getElementById('btnViewFlat').className = `btn btn-sm ${mode === 'flat' ? 'btn-primary' : 'btn-secondary'}`;
+    document.getElementById('btnViewGroup').className = `btn btn-sm ${mode === 'grouped' ? 'btn-primary' : 'btn-secondary'}`;
+    renderFilteredCourses();
+};
+
+window.renderFilteredCourses = () => {
+    const q = document.getElementById('courseSearch').value.toLowerCase();
+    const g = document.getElementById('courseGradeFilter').value;
+    const t = document.getElementById('courseTeacherFilter').value; // Restored Teacher filter value
+
+    const filteredCourses = window._adminCourses.filter(c => {
+        const text = (c.name + ' ' + c.code + ' ' + (c.teacher_name || '')).toLowerCase();
+        const grade = c.grade || '';
+        const teacher = c.teacher_id ? c.teacher_id.toString() : ''; // Get the course's teacher ID
+
+        const matchQ = !q || text.includes(q);
+        const matchG = !g || grade === g;
+        const matchT = !t || teacher === t; // Restored Teacher match check
+
+        return matchQ && matchG && matchT; 
+    });
+
+    const container = document.getElementById('adminCourseGridContainer');
+
+    if (filteredCourses.length === 0) {
+        container.innerHTML = '<div class="empty-state text-center text-muted" style="padding:40px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">No courses match your filters.</div>';
+        updateCourseBulkBar();
+        return;
+    }
+
+    if (window._courseViewMode === 'flat') {
+        container.innerHTML = `<div class="course-grid">${filteredCourses.map(c => generateCourseCardHtml(c)).join('')}</div>`;
+    } else {
+        const grouped = {};
+        filteredCourses.forEach(c => {
+            const gradeLabel = c.grade || 'Unassigned';
+            if (!grouped[gradeLabel]) grouped[gradeLabel] = [];
+            grouped[gradeLabel].push(c);
+        });
+
+        const sortedGrades = Object.keys(grouped).sort((a, b) => {
+            if (a === 'Unassigned') return 1;
+            if (b === 'Unassigned') return -1;
+            const numA = parseInt(a.match(/\d+/)) || 0;
+            const numB = parseInt(b.match(/\d+/)) || 0;
+            if (numA !== numB) return numB - numA;
+            return b.localeCompare(a); 
+        });
+
+        container.innerHTML = sortedGrades.map(grade => `
+            <div class="course-grade-section" style="margin-bottom: 24px;">
+                <h3 style="font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 16px; font-weight: 600; letter-spacing: -0.3px; color: var(--primary-dark); border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <i class="fas fa-layer-group" style="font-size: 13px; margin-right: 6px; color: var(--primary); opacity: 0.85;"></i>
+                        ${escHtml(grade)}
+                    </div>
+                    <span style="font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; background: var(--primary-light); color: var(--primary-dark); padding: 4px 12px; border-radius: 12px; font-weight: 500; letter-spacing: 0;">
+                        ${grouped[grade].length} courses
+                    </span>
+                </h3>
+                <div class="course-grid">
+                    ${grouped[grade].map(c => generateCourseCardHtml(c)).join('')}
+                </div>
+            </div>
+        `).join('');
+    }
+
+    updateCourseBulkBar();
+};
+window.generateCourseCardHtml = (c) => {
+    const isChecked = window._selectedCourseIds.has(c.id) ? 'checked' : '';
+    // Use fallback blue banner if courseBannerClass doesn't exist
+    const bannerClass = typeof courseBannerClass === 'function' ? courseBannerClass(c.id) : 'bg-blue-500';
+    return `
+        <div class="course-card course-item-card" style="position:relative;">
+            <input type="checkbox" class="chk-course" value="${c.id}" ${isChecked} onchange="handleCourseCheckbox(this, ${c.id})" style="position:absolute; top:12px; right:12px; z-index:10; transform:scale(1.4); cursor:pointer;">
+            <div class="course-card-banner ${bannerClass}"></div>
+            <div class="course-card-body">
             <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:4px;">
                 <div class="course-card-code">${escHtml(c.code)}</div>
-                ${c.grade ? `<span class="badge badge-gray" style="font-size:9px;">${escHtml(c.grade)}</span>` : ''}
             </div>
             <div class="course-card-name">${escHtml(c.name)}</div>
             <div class="course-card-desc">${escHtml(c.description||'No description')}</div>
             <div class="course-card-footer">
-              <div class="course-card-teacher"><i class="fas fa-chalkboard-teacher"></i> ${escHtml(c.teacher_name||'Unassigned')}</div>
-              <div class="flex gap-8">
+                <div class="course-card-teacher"><i class="fas fa-chalkboard-teacher"></i> ${escHtml(c.teacher_name||'Unassigned')}</div>
+                <div class="flex gap-8">
                 <button class="btn btn-secondary btn-sm" onclick="manageEnrollments(${c.id},'${escHtml(c.name)}')"><i class="fas fa-users"></i></button>
                 <button class="btn btn-secondary btn-sm" onclick="showEditCourse(${c.id})"><i class="fas fa-edit"></i> Edit</button>
-              </div>
+                </div>
             </div>
-          </div>
+            </div>
         </div>
-      `).join('')}
-    </div>
-  `);
-}
+    `;
+};
+
+window.handleCourseCheckbox = (checkbox, id) => {
+    if (checkbox.checked) window._selectedCourseIds.add(id);
+    else window._selectedCourseIds.delete(id);
+    updateCourseBulkBar();
+};
 
 window.toggleSelectAllCourses = (checked) => {
     document.querySelectorAll('.chk-course').forEach(cb => {
-        if(cb.closest('.course-item-card').style.display !== 'none') cb.checked = checked;
+        cb.checked = checked;
+        const id = parseInt(cb.value);
+        if (checked) window._selectedCourseIds.add(id);
+        else window._selectedCourseIds.delete(id);
     });
     updateCourseBulkBar();
 };
 
 window.updateCourseBulkBar = () => {
-    const count = document.querySelectorAll('.chk-course:checked').length;
+    const count = window._selectedCourseIds.size;
     const bar = document.getElementById('courseBulkBar');
     if(bar) {
         bar.style.display = count > 0 ? 'flex' : 'none';
         document.getElementById('courseSelCount').textContent = count;
     }
-};
-
-window.filterCourses = () => {
-    const q = document.getElementById('courseSearch').value.toLowerCase();
-    const g = document.getElementById('courseGradeFilter').value;
     
-    document.querySelectorAll('.course-item-card').forEach(card => {
-        const text = card.textContent.toLowerCase();
-        const grade = card.dataset.grade || '';
-        const matchQ = !q || text.includes(q);
-        const matchG = !g || grade === g;
-        
-        if (matchQ && matchG) {
-            card.style.display = '';
-        } else {
-            card.style.display = 'none';
-            const cb = card.querySelector('.chk-course');
-            if(cb) cb.checked = false; 
-        }
-    });
-    updateCourseBulkBar();
+    const visibleCheckboxes = document.querySelectorAll('.chk-course');
+    const masterChk = document.getElementById('chkSelectAllCourses');
+    if (masterChk && visibleCheckboxes.length > 0) {
+        masterChk.checked = Array.from(visibleCheckboxes).every(cb => cb.checked);
+    } else if (masterChk) {
+        masterChk.checked = false;
+    }
 };
 
 window.bulkDeleteCourses = async () => {
-    const checked = Array.from(document.querySelectorAll('.chk-course:checked')).map(cb => cb.value);
-    if (!confirm(`Are you sure you want to delete ${checked.length} course(s)? ALL assignments, quizzes, and enrollments inside them will be destroyed!`)) return;
-    try {
-        await apiJSON('/api/admin/courses/bulk-delete', { ids: checked });
-        showToast(`Successfully deleted ${checked.length} course(s)`, 'success');
-        loadAdminCourses();
-    } catch(e) { showToast(e.message, 'error'); }
-};
-
-function showEditCourse(id) {
-  const c = window._adminCourses.find(x => x.id === id);
-  const teachers = window._adminTeachers || [];
-  openModal('Edit Course', modalForm([
-    { label: 'Course Code', name: 'code', value: c.code, required: true },
-    { label: 'Course Name', name: 'name', value: c.name, required: true },
-    { label: 'Target Grade (Optional)', name: 'grade', type: 'select', value: c.grade || '', options: GRADE_OPTIONS },
-    { label: 'Description', name: 'description', type: 'textarea', value: c.description || '' },
-    { label: 'Teacher', name: 'teacher_id', type: 'select', value: c.teacher_id, required: true, options: teachers.map(t => ({ value: t.id, label: t.full_name })) },
-    { label: 'Start Date', name: 'start_date', type: 'date', value: c.start_date || '', required: true },
-    { label: 'End Date', name: 'end_date', type: 'date', value: c.end_date || '', required: true },
-  ], async (fd) => {
-    try { await api(`/api/admin/courses/${id}`, { method: 'PUT', body: fd }); closeModal(); showToast('Course updated!', 'success'); loadAdminCourses();
-    } catch (e) { showToast(e.message, 'error'); }
-  }, 'Save Changes'));
-}
-
-function showCreateCourse() {
-  const teachers = window._adminTeachers || [];
-  openModal('Create New Course', modalForm([
-    { label: 'Course Code', name: 'code', placeholder: 'e.g. SCI-10', required: true },
-    { label: 'Course Name', name: 'name', placeholder: 'e.g. Grade 10 Science', required: true },
-    { label: 'Target Grade (Optional)', name: 'grade', type: 'select', options: GRADE_OPTIONS },
-    { label: 'Description', name: 'description', type: 'textarea' },
-    { label: 'Teacher', name: 'teacher_id', type: 'select', required: true, options: teachers.map(t => ({ value: t.id, label: t.full_name })) },
-    { label: 'Start Date', name: 'start_date', type: 'date', required: true },
-    { label: 'End Date', name: 'end_date', type: 'date', required: true },
-  ], async (fd) => {
-    try { await apiPost('/api/admin/courses', fd); closeModal(); showToast('Course created!', 'success'); loadAdminCourses();
-    } catch (e) { showToast(e.message, 'error'); }
-  }, 'Create Course'));
-}
-
-async function deleteCourse(id, name) {
-  if (!confirm(`Delete course "${name}"? This cannot be undone.`)) return;
-  try { await apiDelete(`/api/admin/courses/${id}`); showToast('Course deleted', 'success'); loadAdminCourses(); } catch (e) { showToast(e.message, 'error'); }
-}
-
-async function manageEnrollments(courseId, courseName) {
-  const data = await api(`/api/admin/courses/${courseId}/students`);
-  const gradeFilterOptions = GRADE_OPTIONS.map(g => `<option value="${g.value}">${g.label === '— Select Grade (or leave blank) —' ? 'All Grades' : g.label}</option>`).join('');
-
-  let html = `
-    <div style="display:flex; gap:20px; align-items:flex-start;">
-      <div style="flex:1; border:1px solid var(--border); border-radius:8px; padding:16px; background:#fafafa;">
-        <div style="display:flex; justify-content:space-between; margin-bottom:12px;"><h4 style="margin:0">Enrolled (${data.enrolled.length})</h4><button class="btn btn-danger btn-xs" onclick="bulkUnenroll(${courseId})">Remove Selected</button></div>
-        <div style="max-height:300px; overflow-y:auto; border:1px solid #e2e8f0; background:white;">
-          <table style="width:100%; font-size:13px;">
-            <thead style="position:sticky; top:0; background:#f8fafc; z-index:1;">
-              <tr>
-                <th style="padding:8px"><input type="checkbox" onchange="toggleSelectAllUnenrollStudents(this.checked)"></th>
-                <th style="padding:8px">Student</th>
-              </tr>
-            </thead>
-            <tbody>${data.enrolled.map(s => `<tr><td style="padding:8px; border-bottom:1px solid #eee;"><input type="checkbox" class="unenroll-chk" value="${s.id}"></td><td style="padding:8px; border-bottom:1px solid #eee;">${escHtml(s.full_name)} <br><span class="text-muted text-sm">${escHtml(s.grade || 'No Grade')}</span></td></tr>`).join('')}</tbody>
-          </table>
-        </div>
-      </div>
-      <div style="flex:1; border:1px solid var(--border); border-radius:8px; padding:16px; background:#fafafa;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;"><h4 style="margin:0">Add Students</h4><button class="btn btn-primary btn-xs" onclick="bulkEnroll(${courseId})">+ Enroll Selected</button></div>
-        <div style="display:flex; gap:8px; margin-bottom:8px;">
-          <select id="addStudentGradeFilter" class="form-control" style="padding:6px; font-size:12px;" onchange="filterAddStudents()">
-            ${gradeFilterOptions}
-          </select>
-          <input type="text" id="addStudentSearch" class="form-control" style="padding:6px; font-size:12px; flex:1;" placeholder="Search name..." oninput="filterAddStudents()">
-        </div>
-        <div style="max-height:265px; overflow-y:auto; border:1px solid #e2e8f0; background:white;">
-          <table style="width:100%; font-size:13px;" id="addStudentsTable">
-            <thead style="position:sticky; top:0; background:#f8fafc; z-index:1;">
-              <tr>
-                <th style="padding:8px"><input type="checkbox" onchange="toggleSelectAllAddStudents(this.checked)"></th>
-                <th style="padding:8px">Available</th>
-              </tr>
-            </thead>
-            <tbody>${data.available.map(s => `<tr data-grade="${escHtml(s.grade || '')}"><td style="padding:8px; border-bottom:1px solid #eee;"><input type="checkbox" class="enroll-chk" value="${s.id}"></td><td style="padding:8px; border-bottom:1px solid #eee;" class="stu-name">${escHtml(s.full_name)} <br><span class="text-muted text-sm">${escHtml(s.grade || 'No Grade')}</span></td></tr>`).join('')}</tbody>
-          </table>
-        </div>
-      </div>
-    </div>`;
+    const checkedIds = Array.from(window._selectedCourseIds);
+    if (checkedIds.length === 0) return;
+    if (!confirm(`Are you sure you want to delete ${checkedIds.length} course(s)? ALL assignments, quizzes, and enrollments inside them will be destroyed!`)) return;
     
-  window.filterAddStudents = () => { 
-    const q = document.getElementById('addStudentSearch').value.toLowerCase(); 
-    const g = document.getElementById('addStudentGradeFilter').value;
-    document.querySelectorAll('#addStudentsTable tbody tr').forEach(row => { 
-      const name = row.querySelector('.stu-name').textContent.toLowerCase(); 
-      const grade = row.dataset.grade || '';
-      if ((!q || name.includes(q)) && (!g || grade === g)) {
-          row.style.display = '';
-      } else {
-          row.style.display = 'none';
-          const cb = row.querySelector('.enroll-chk');
-          if (cb) cb.checked = false; // Instantly uncheck if hidden
-      }
-    }); 
-  };
-
-  // Safely selects ONLY the checkboxes inside rows that are currently visible
-  window.toggleSelectAllAddStudents = (checked) => {
-      document.querySelectorAll('#addStudentsTable tbody tr').forEach(row => {
-          if (row.style.display !== 'none') {
-              const cb = row.querySelector('.enroll-chk');
-              if (cb) cb.checked = checked;
-          }
-      });
-  };
-
-  window.toggleSelectAllUnenrollStudents = (checked) => {
-      document.querySelectorAll('.unenroll-chk').forEach(cb => {
-          if (cb.closest('tr').style.display !== 'none') cb.checked = checked;
-      });
-  };
-
-  window.bulkEnroll = async (cid) => { const ids = Array.from(document.querySelectorAll('.enroll-chk:checked')).map(c => parseInt(c.value)); if(!ids.length) return; await apiJSON(`/api/admin/courses/${cid}/enroll/bulk`, { student_ids: ids }); manageEnrollments(cid, courseName); };
-  window.bulkUnenroll = async (cid) => { const ids = Array.from(document.querySelectorAll('.unenroll-chk:checked')).map(c => parseInt(c.value)); if(!ids.length) return; await apiJSON(`/api/admin/courses/${cid}/unenroll/bulk`, { student_ids: ids }); manageEnrollments(cid, courseName); };
-  
-  openModal(`Students — ${courseName}`, html, 'modal-box-lg');
-}
-// ================================================================
-// HYBRID DIRECT PAYMENT FEES
+    try {
+        await apiJSON('/api/admin/courses/bulk-delete', { ids: checkedIds });
+        showToast(`Successfully deleted ${checkedIds.length} course(s)`, 'success');
+        loadAdminCourses(); 
+    } catch(e) { showToast(e.message, 'error'); }
+};// HYBRID DIRECT PAYMENT FEES
 // ================================================================
 
 async function loadAdminFees() {
@@ -1600,41 +1578,125 @@ window.assignClassTeacher = async (gradeName) => {
         } catch (e) { showToast(e.message, 'error'); }
     }, 'Assign Teacher'));
 };
-
 window.assignCourseToClass = async (gradeName) => {
+    // Fetch courses if not already cached
     const courses = window._adminCourses ? window._adminCourses : await api('/api/admin/courses');
     
-    openModal(`Bulk Enroll: ${gradeName}`, `
-        <div class="alert alert-warn mb-16">This will immediately enroll every student currently in <strong>${escHtml(gradeName)}</strong> into the selected course.</div>
-        <form id="bulkCourseForm" onsubmit="return false">
-            <div class="form-group">
-                <label>Select Subject/Course</label>
-                <select name="course_id" class="form-control" required>
-                    ${courses.map(c => `<option value="${c.id}">${escHtml(c.name)} (${escHtml(c.code)})</option>`).join('')}
-                </select>
-            </div>
-            <div class="flex gap-8 mt-16" style="justify-content:flex-end">
-                <button type="button" class="btn btn-secondary" onclick="execShowGradeStudents('${escHtml(gradeName)}')">Back</button>
-                <button type="submit" class="btn btn-primary" onclick="submitBulkCourse('${escHtml(gradeName)}')">Assign Course</button>
-            </div>
-        </form>
-    `);
+    // Build the Grade Filter Dropdown
+    const gradeFilterOptions = GRADE_OPTIONS.map(g => {
+        // Auto-select the matching grade in the dropdown
+        const isSelected = g.value === gradeName ? 'selected' : '';
+        const label = g.label === '— Select Grade (or leave blank) —' ? 'All Grades' : g.label;
+        return `<option value="${g.value}" ${isSelected}>${label}</option>`;
+    }).join('');
 
-    window.submitBulkCourse = async (gName) => {
-        const form = document.getElementById('bulkCourseForm');
-        if (!form.checkValidity()) { form.reportValidity(); return; }
-        const fd = new FormData(form);
-        const btn = form.querySelector('.btn-primary');
-        btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:6px"></div> Enrolling...';
+    // State to hold selected courses
+    let selectedCourses = new Set();
+
+    openModal(`Bulk Assign Courses: ${gradeName}`, `
+        <div class="alert alert-info mb-16">
+            <i class="fas fa-info-circle"></i> Select multiple courses below. Every student in <strong>${escHtml(gradeName)}</strong> will be enrolled into all selected courses at once.
+        </div>
+
+        <div style="display:flex; gap:10px; margin-bottom:16px;">
+            <input type="text" id="bulkCourseSearch" class="form-control" style="flex: 1;" placeholder="Search by course name or code..." oninput="window.filterBulkCourses()">
+            <select id="bulkCourseGrade" class="form-control" style="width:160px;" onchange="window.filterBulkCourses()">
+                ${gradeFilterOptions}
+            </select>
+        </div>
+
+        <div id="bulkCourseList" style="max-height: 350px; overflow-y: auto; padding-right: 8px; margin-bottom: 20px; border-radius: 8px;">
+            </div>
+
+        <div class="flex gap-8" style="justify-content:space-between; align-items:center; border-top:1px solid var(--border); padding-top:16px;">
+            <div class="text-sm" style="color: var(--primary-dark); font-weight: 600;"><strong id="bulkCourseCount">0</strong> courses selected</div>
+            <div class="flex gap-8">
+                <button type="button" class="btn btn-secondary" onclick="execShowGradeStudents('${escHtml(gradeName)}')">Cancel</button>
+                <button type="button" id="bulkCourseBtn" class="btn btn-primary" disabled onclick="submitBulkCourses('${escHtml(gradeName)}')">
+                    <i class="fas fa-check"></i> Assign 0 Course(s)
+                </button>
+            </div>
+        </div>
+    `, 'modal-box-lg');
+
+    // Function to render and filter the list
+    window.filterBulkCourses = () => {
+        const q = document.getElementById('bulkCourseSearch').value.toLowerCase();
+        const g = document.getElementById('bulkCourseGrade').value;
+
+        const filtered = courses.filter(c => {
+            const matchQ = !q || c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q);
+            const matchG = !g || (c.grade || '') === g;
+            return matchQ && matchG;
+        });
+
+        const listEl = document.getElementById('bulkCourseList');
+        if (filtered.length === 0) {
+            listEl.innerHTML = '<div class="empty-state text-center text-muted" style="padding:20px; font-size:13px;">No courses match your search/filter.</div>';
+            return;
+        }
+
+        listEl.innerHTML = filtered.map(c => {
+            const isChecked = selectedCourses.has(c.id) ? 'checked' : '';
+            return `
+                <label style="display:flex; align-items:center; gap:14px; padding:14px; border:1px solid var(--border); border-radius:8px; margin-bottom:8px; cursor:pointer; background:white; transition:all 0.2s;" onmouseover="this.style.background='#f8fafc'; this.style.borderColor='#cbd5e1';" onmouseout="this.style.background='white'; this.style.borderColor='var(--border)';">
+                    <input type="checkbox" value="${c.id}" ${isChecked} onchange="toggleBulkCourse(${c.id}, this.checked)" style="transform:scale(1.3); cursor:pointer;">
+                    <div style="flex:1;">
+                        <div style="font-weight:600; color:var(--text); font-size: 14px;">
+                            ${escHtml(c.name)} 
+                            <span style="font-size:11px; font-weight:700; color:var(--primary); background:var(--primary-light); padding:3px 8px; border-radius:12px; margin-left:8px;">${escHtml(c.code)}</span>
+                        </div>
+                        <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+                            <strong>Grade:</strong> ${escHtml(c.grade || 'Unassigned')} &nbsp;|&nbsp; 
+                            <strong>Teacher:</strong> ${escHtml(c.teacher_name || 'Unassigned')}
+                        </div>
+                    </div>
+                </label>
+            `;
+        }).join('');
+    };
+
+    // Toggle individual checkbox
+    window.toggleBulkCourse = (id, checked) => {
+        if (checked) selectedCourses.add(id);
+        else selectedCourses.delete(id);
+        
+        const count = selectedCourses.size;
+        document.getElementById('bulkCourseCount').textContent = count;
+        
+        const btn = document.getElementById('bulkCourseBtn');
+        btn.disabled = count === 0;
+        btn.innerHTML = `<i class="fas fa-check"></i> Assign ${count} Course(s)`;
+    };
+
+    // Initial render
+    window.filterBulkCourses();
+
+    // Submission logic (loops through selected courses and hits the endpoint)
+    window.submitBulkCourses = async (gName) => {
+        if (selectedCourses.size === 0) return;
+        
+        const btn = document.getElementById('bulkCourseBtn');
+        btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:6px"></div> Processing...';
         btn.disabled = true;
 
         try {
-            const res = await apiPost(`/api/admin/classes/${encodeURIComponent(gName)}/enroll`, fd);
-            showToast(`Success! ${res.enrolled_count} students enrolled.`, 'success');
-            execShowGradeStudents(gName); // Return to class overview
+            let coursesProcessed = 0;
+            
+            // Loop through all selected courses and assign the class to them
+            for (let cid of selectedCourses) {
+                const fd = new FormData();
+                fd.append('course_id', cid);
+                await apiPost(`/api/admin/classes/${encodeURIComponent(gName)}/enroll`, fd);
+                coursesProcessed++;
+            }
+            
+            showToast(`Success! Students enrolled in ${coursesProcessed} course(s).`, 'success');
+            execShowGradeStudents(gName); // Return to class overview to see the changes
         } catch (e) { 
             showToast(e.message, 'error'); 
-            btn.innerHTML = 'Assign Course'; btn.disabled = false;
+            btn.innerHTML = `<i class="fas fa-check"></i> Assign ${selectedCourses.size} Course(s)`; 
+            btn.disabled = false;
         }
     };
 };
@@ -1770,6 +1832,7 @@ const GRADE_OPTIONS = [
   { value: 'Grade 9', label: 'Grade 9' }, { value: 'Grade 10', label: 'Grade 10' }, 
   { value: 'Grade 11 (O/L)', label: 'Grade 11 (O/L)' },
   { value: 'Grade 12 (A/L)', label: 'Grade 12 (A/L)' }, { value: 'Grade 13 (A/L)', label: 'Grade 13 (A/L)' },
+  { value: 'Alumni / Graduated', label: '🎓 Alumni / Graduated' } // Added so seniors have somewhere to go
 ];
 
 function roleBadge(role) {
@@ -1923,7 +1986,10 @@ async function loadAdminFees() {
     <div class="card">
       <div class="card-header" style="background:#fafafa;">
         <span class="card-title">Student Payment Directory</span>
-        <input type="text" id="feeStudentSearch" class="search-box" style="float:right;" placeholder="🔍 Search student..." oninput="filterFeeStudents()">
+        <div style="float:right; display:flex; gap:10px;">
+            <button class="btn btn-success btn-sm" onclick="exportToCSV('#feeStudentsTable', 'Fee_Status_Report.csv')"><i class="fas fa-file-excel"></i> Export CSV</button>
+            <input type="text" id="feeStudentSearch" class="search-box" placeholder="🔍 Search student..." oninput="filterFeeStudents()">
+        </div>
       </div>
       <div class="table-wrapper">
         <table id="feeStudentsTable">
@@ -2598,4 +2664,641 @@ window.submitTeacherSalary = async (teacherId, teacherName) => {
         showToast('Salary payment recorded successfully!', 'success');
         viewTeacherSalary(teacherId, teacherName); // Refresh Modal
     } catch(e) { showToast(e.message, 'error'); }
+};
+
+
+// ================================================================
+// COURSE CREATION, EDITING & ENROLLMENT (RESTORED)
+// ================================================================
+
+window.showCreateCourse = () => {
+    const teachers = window._adminTeachers || [];
+    
+    // Automatically select the grade from the filter if one is active
+    const activeGradeFilter = document.getElementById('courseGradeFilter')?.value || '';
+
+    openModal('Create Course', modalForm([
+        { label: 'Course Code', name: 'code', placeholder: 'e.g. OL-MATH-11', required: true },
+        { label: 'Course Name', name: 'name', placeholder: 'e.g. O/L Mathematics', required: true },
+        { label: 'Grade (Categorization)', name: 'grade', type: 'select', value: activeGradeFilter, options: GRADE_OPTIONS },
+        { label: 'Description', name: 'description', type: 'textarea' },
+        { label: 'Assign Teacher', name: 'teacher_id', type: 'select', required: true,
+          options: [{ value: '', label: '— Select a Teacher —' }, ...teachers.map(t => ({ value: t.id, label: t.full_name }))] },
+        { label: 'Start Date (Optional)', name: 'start_date', type: 'date' },
+        { label: 'End Date (Optional)', name: 'end_date', type: 'date' }
+    ], async (fd) => {
+        try {
+            await apiPost('/api/admin/courses', fd);
+            closeModal(); showToast('Course created successfully!', 'success'); loadAdminCourses();
+        } catch(e) { showToast(e.message, 'error'); }
+    }, 'Create Course'));
+};
+
+window.showEditCourse = (cid) => {
+    const c = window._adminCourses.find(x => x.id === cid);
+    if (!c) return;
+    const teachers = window._adminTeachers || [];
+    
+    openModal(`Edit Course: ${c.code}`, modalForm([
+        { label: 'Course Code', name: 'code', value: c.code, required: true },
+        { label: 'Course Name', name: 'name', value: c.name, required: true },
+        { label: 'Grade (Categorization)', name: 'grade', type: 'select', value: c.grade || '', options: GRADE_OPTIONS },
+        { label: 'Description', name: 'description', type: 'textarea', value: c.description || '' },
+        { label: 'Assign Teacher', name: 'teacher_id', type: 'select', value: c.teacher_id || '', required: true,
+          options: [{ value: '', label: '— Select a Teacher —' }, ...teachers.map(t => ({ value: t.id, label: t.full_name }))] },
+        { label: 'Start Date', name: 'start_date', type: 'date', value: c.start_date || '' },
+        { label: 'End Date', name: 'end_date', type: 'date', value: c.end_date || '' }
+    ], async (fd) => {
+        try {
+            await api(`/api/admin/courses/${cid}`, { method: 'PUT', body: fd });
+            closeModal(); showToast('Course updated!', 'success'); loadAdminCourses();
+        } catch(e) { showToast(e.message, 'error'); }
+    }, 'Save Changes'));
+};
+
+window.manageEnrollments = async (cid, cname) => {
+    openModal(`Manage Students: ${cname}`, '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
+    try {
+        const data = await api(`/api/admin/courses/${cid}/students`);
+        window._availableStudents = data.available;
+        window._selectedStudentIds = new Set();
+
+        const gradeFilterOptions = GRADE_OPTIONS.map(g => `<option value="${g.value}">${g.label === '— Select Grade (or leave blank) —' ? 'All Grades' : g.label}</option>`).join('');
+
+        let html = `
+            <div class="tabs mb-16">
+                <button class="tab-btn active" id="btnTabEnrolled" onclick="switchEnrollTab('enrolled')">Currently Enrolled (${data.enrolled.length})</button>
+                <button class="tab-btn" id="btnTabAvailable" onclick="switchEnrollTab('available')">➕ Add New Students</button>
+            </div>
+
+            <div id="enrollTab-enrolled" style="display:block;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+                    <input type="text" id="enrollSearch" class="form-control" style="width:100%; max-width:300px;" placeholder="🔍 Search enrolled students..." oninput="filterEnrollments()">
+                    ${data.enrolled.length > 0 ? `<button class="btn btn-danger btn-sm" onclick="bulkUnenrollStudents(${cid}, '${escHtml(cname)}')"><i class="fas fa-trash-alt"></i> Remove Displayed</button>` : ''}
+                </div>
+                <div class="table-wrapper" style="max-height: 400px; overflow-y: auto;">
+                    <table id="enrollmentTable" style="width:100%; font-size:13.5px;">
+                        <thead style="position:sticky; top:0; z-index:1; background:#f8fafc;">
+                            <tr>
+                                <th style="padding:12px; text-align:left;">Student Name</th>
+                                <th style="padding:12px; text-align:left;">Grade</th>
+                                <th style="padding:12px; text-align:right;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.enrolled.map(s => `
+                                <tr class="enrollment-row" data-sid="${s.id}">
+                                    <td class="en-name" style="padding:12px; border-bottom:1px solid #f1f5f9;">
+                                        <strong>${escHtml(s.full_name)}</strong><br>
+                                        <span class="text-muted text-sm">${escHtml(s.username)}</span>
+                                    </td>
+                                    <td style="padding:12px; border-bottom:1px solid #f1f5f9;">
+                                        <span class="badge badge-gray">${escHtml(s.grade || 'Unassigned')}</span>
+                                    </td>
+                                    <td style="padding:12px; border-bottom:1px solid #f1f5f9; text-align:right;">
+                                        <button class="btn btn-danger btn-sm" onclick="unenrollStudent(${cid}, ${s.id}, '${escHtml(cname)}')"><i class="fas fa-trash"></i> Remove</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                            ${data.enrolled.length === 0 ? '<tr><td colspan="3" class="text-center text-muted" style="padding:30px;">No students are currently enrolled in this course.</td></tr>' : ''}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="enrollTab-available" style="display:none;">
+                <div style="display:flex; gap:10px; margin-bottom:16px;">
+                    <input type="text" id="availStudentSearch" class="form-control" style="flex: 1;" placeholder="Search by name or username..." oninput="filterAvailableStudents()">
+                    <select id="availStudentGrade" class="form-control" style="width:160px;" onchange="filterAvailableStudents()">
+                        ${gradeFilterOptions}
+                    </select>
+                </div>
+
+                <div id="availStudentList" style="max-height: 350px; overflow-y: auto; padding-right: 8px; margin-bottom: 20px; border-radius: 8px;">
+                    </div>
+
+                <div class="flex gap-8" style="justify-content:space-between; align-items:center; border-top:1px solid var(--border); padding-top:16px;">
+                    <div class="text-sm" style="color: var(--primary-dark); font-weight: 600;"><strong id="bulkStudentCount">0</strong> students selected</div>
+                    <div class="flex gap-8">
+                        <button type="button" class="btn btn-secondary" onclick="toggleSelectAllBulkStudents()">Select All Visible</button>
+                        <button type="button" id="bulkEnrollBtn" class="btn btn-primary" disabled onclick="bulkEnrollStudents(${cid}, '${escHtml(cname)}')">
+                            <i class="fas fa-user-plus"></i> Enroll 0 Student(s)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.getElementById('modalBody').innerHTML = html;
+
+        window.switchEnrollTab = (tab) => {
+            document.getElementById('btnTabEnrolled').classList.remove('active');
+            document.getElementById('btnTabAvailable').classList.remove('active');
+            document.getElementById('enrollTab-enrolled').style.display = 'none';
+            document.getElementById('enrollTab-available').style.display = 'none';
+            
+            if (tab === 'enrolled') {
+                document.getElementById('btnTabEnrolled').classList.add('active');
+                document.getElementById('enrollTab-enrolled').style.display = 'block';
+            } else {
+                document.getElementById('btnTabAvailable').classList.add('active');
+                document.getElementById('enrollTab-available').style.display = 'block';
+                filterAvailableStudents();
+            }
+        };
+
+        window.filterEnrollments = () => {
+            const q = document.getElementById('enrollSearch').value.toLowerCase();
+            document.querySelectorAll('.enrollment-row').forEach(row => {
+                row.style.display = row.querySelector('.en-name').textContent.toLowerCase().includes(q) ? '' : 'none';
+            });
+        };
+
+        window.filterAvailableStudents = () => {
+            const q = document.getElementById('availStudentSearch').value.toLowerCase();
+            const g = document.getElementById('availStudentGrade').value;
+
+            const filtered = window._availableStudents.filter(s => {
+                const matchQ = !q || s.full_name.toLowerCase().includes(q) || s.username.toLowerCase().includes(q);
+                const matchG = !g || (s.grade || '') === g;
+                return matchQ && matchG;
+            });
+
+            const listEl = document.getElementById('availStudentList');
+            if (filtered.length === 0) {
+                listEl.innerHTML = '<div class="empty-state text-center text-muted" style="padding:20px; font-size:13px;">No available students match your criteria.</div>';
+                return;
+            }
+
+            listEl.innerHTML = filtered.map(s => {
+                const isChecked = window._selectedStudentIds.has(s.id) ? 'checked' : '';
+                return `
+                    <label class="avail-student-row" style="display:flex; align-items:center; gap:14px; padding:12px 14px; border:1px solid var(--border); border-radius:8px; margin-bottom:8px; cursor:pointer; background:white; transition:all 0.2s;" onmouseover="this.style.background='#f8fafc'; this.style.borderColor='#cbd5e1';" onmouseout="this.style.background='white'; this.style.borderColor='var(--border)';">
+                        <input type="checkbox" class="chk-avail-student" value="${s.id}" ${isChecked} onchange="toggleBulkStudent(${s.id}, this.checked)" style="transform:scale(1.3); cursor:pointer;">
+                        <div style="flex:1;">
+                            <div style="font-weight:600; color:var(--text); font-size: 14px;">
+                                ${escHtml(s.full_name)}
+                            </div>
+                            <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+                                <strong>Username:</strong> ${escHtml(s.username)} &nbsp;|&nbsp; 
+                                <strong>Grade:</strong> <span class="badge badge-gray" style="font-size:9px; padding:2px 6px;">${escHtml(s.grade || 'Unassigned')}</span>
+                            </div>
+                        </div>
+                    </label>
+                `;
+            }).join('');
+        };
+
+        window.toggleBulkStudent = (id, checked) => {
+            if (checked) window._selectedStudentIds.add(id);
+            else window._selectedStudentIds.delete(id);
+            
+            const count = window._selectedStudentIds.size;
+            document.getElementById('bulkStudentCount').textContent = count;
+            
+            const btn = document.getElementById('bulkEnrollBtn');
+            btn.disabled = count === 0;
+            btn.innerHTML = `<i class="fas fa-user-plus"></i> Enroll ${count} Student(s)`;
+        };
+
+        window.toggleSelectAllBulkStudents = () => {
+            const checkboxes = document.querySelectorAll('.chk-avail-student');
+            if (checkboxes.length === 0) return;
+            
+            // Check if they are currently all selected
+            const allSelected = Array.from(checkboxes).every(cb => cb.checked);
+            
+            checkboxes.forEach(cb => {
+                cb.checked = !allSelected;
+                toggleBulkStudent(parseInt(cb.value), !allSelected);
+            });
+        };
+
+        window.bulkEnrollStudents = async (cId, cName) => {
+            if (window._selectedStudentIds.size === 0) return;
+            
+            const btn = document.getElementById('bulkEnrollBtn');
+            btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:6px"></div> Enrolling...';
+            btn.disabled = true;
+
+            try {
+                const idsArray = Array.from(window._selectedStudentIds);
+                await apiJSON(`/api/admin/courses/${cId}/enroll/bulk`, { student_ids: idsArray });
+                showToast(`Successfully enrolled ${idsArray.length} student(s)!`, 'success');
+                
+                // Refresh modal
+                manageEnrollments(cId, cName);
+                // Refresh background grid quietly to update numbers
+                api('/api/admin/courses').then(c => { window._adminCourses = c; renderFilteredCourses(); });
+            } catch (e) {
+                showToast(e.message, 'error');
+                btn.innerHTML = `<i class="fas fa-user-plus"></i> Enroll ${window._selectedStudentIds.size} Student(s)`;
+                btn.disabled = false;
+            }
+        };
+
+        window.unenrollStudent = async (cId, sId, cName) => {
+            if (!confirm('Are you sure you want to remove this student from the course?')) return;
+            try {
+                await apiDelete(`/api/admin/courses/${cId}/enroll/${sId}`);
+                showToast('Student removed from course.', 'success');
+                manageEnrollments(cId, cName);
+                api('/api/admin/courses').then(c => { window._adminCourses = c; renderFilteredCourses(); });
+            } catch (e) { showToast(e.message, 'error'); }
+        };
+
+        window.bulkUnenrollStudents = async (cId, cName) => {
+            const visibleRows = Array.from(document.querySelectorAll('.enrollment-row')).filter(row => row.style.display !== 'none');
+            const studentIds = visibleRows.map(row => parseInt(row.getAttribute('data-sid')));
+            
+            if (studentIds.length === 0) return;
+            if (!confirm(`Are you sure you want to remove these ${studentIds.length} students from the course?`)) return;
+
+            try {
+                await apiJSON(`/api/admin/courses/${cId}/unenroll/bulk`, { student_ids: studentIds });
+                showToast(`Successfully removed ${studentIds.length} student(s).`, 'success');
+                manageEnrollments(cId, cName);
+                api('/api/admin/courses').then(c => { window._adminCourses = c; renderFilteredCourses(); });
+            } catch (e) { showToast(e.message, 'error'); }
+        };
+
+    } catch (e) {
+        document.getElementById('modalBody').innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+    }
+};
+
+
+// ================================================================
+// ACADEMIC ROLLOVER (BULK PROMOTION TOOL)
+// ================================================================
+
+window.showBulkPromoteModal = () => {
+    // Re-use your existing global GRADE_OPTIONS
+    const gradeOptionsHtml = GRADE_OPTIONS.map(g => `<option value="${g.value}">${g.label === '— Select Grade (or leave blank) —' ? '— Select a Grade —' : g.label}</option>`).join('');
+    
+    openModal('Academic Rollover Tool', `
+        <div class="alert alert-info mb-16">
+            <i class="fas fa-info-circle"></i> Use this tool at the end of the academic year to promote an entire class to the next grade level. You can manually uncheck students who are repeating the year or leaving the school.
+        </div>
+
+        <div class="form-row form-row-2">
+            <div class="form-group">
+                <label>Source Grade (Current)</label>
+                <select id="promoSource" class="form-control" onchange="loadStudentsForPromotion()">
+                    ${gradeOptionsHtml}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Destination Grade (Next Year)</label>
+                <select id="promoTarget" class="form-control">
+                    ${gradeOptionsHtml}
+                </select>
+            </div>
+        </div>
+
+        <div id="promoStudentList" style="max-height: 350px; overflow-y: auto; padding-right: 8px; margin-bottom: 20px; border-radius: 8px; border: 1px solid var(--border); background: #f8fafc; padding: 12px; display: none;">
+            </div>
+
+        <div class="flex gap-8" style="justify-content:space-between; align-items:center; border-top:1px solid var(--border); padding-top:16px;">
+            <div class="text-sm text-muted">Ensure all checkboxes are correct before proceeding.</div>
+            <div class="flex gap-8">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="button" id="promoSubmitBtn" class="btn btn-primary" disabled onclick="submitBulkPromotion()">
+                     Promote Selected Students
+                </button>
+            </div>
+        </div>
+    `, 'modal-box-lg');
+};
+
+window.loadStudentsForPromotion = async () => {
+    const source = document.getElementById('promoSource').value;
+    const listEl = document.getElementById('promoStudentList');
+    const submitBtn = document.getElementById('promoSubmitBtn');
+    
+    if (!source) {
+        listEl.style.display = 'none';
+        submitBtn.disabled = true;
+        return;
+    }
+
+    listEl.style.display = 'block';
+    listEl.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
+    
+    // Ensure we have users cached
+    if (!window._adminUsers) {
+        window._adminUsers = await api('/api/admin/users');
+    }
+    
+    const promoStudents = window._adminUsers.filter(u => u.role === 'student' && (u.grade === source || (source === 'Unassigned' && !u.grade)));
+    
+    if (promoStudents.length === 0) {
+        listEl.innerHTML = '<div class="empty-state text-muted" style="padding:20px;">No students found in this grade.</div>';
+        submitBtn.disabled = true;
+        return;
+    }
+
+    let html = `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding-bottom:8px; border-bottom:2px solid #e2e8f0;">
+        <label style="font-weight:700; cursor:pointer; display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" id="chkPromoAll" checked onchange="togglePromoAll(this.checked)" style="transform:scale(1.2);"> 
+            Select All (${promoStudents.length} Students)
+        </label>
+    </div>`;
+
+    html += promoStudents.map(s => `
+        <label style="display:flex; align-items:center; gap:14px; padding:10px; border-bottom:1px solid #e2e8f0; cursor:pointer; background:white; transition:all 0.15s;" onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background='white'">
+            <input type="checkbox" class="chk-promo-student" value="${s.id}" checked onchange="updatePromoBtn()" style="transform:scale(1.2);">
+            <div style="flex:1;">
+                <div style="font-weight:600; font-size: 14px; color:var(--text);">${escHtml(s.full_name)}</div>
+                <div style="font-size:11px; color:var(--text-muted);">${s.admission_number ? escHtml(s.admission_number) : escHtml(s.username)}</div>
+            </div>
+        </label>
+    `).join('');
+
+    listEl.innerHTML = html;
+    updatePromoBtn();
+};
+
+window.togglePromoAll = (checked) => {
+    document.querySelectorAll('.chk-promo-student').forEach(cb => cb.checked = checked);
+    updatePromoBtn();
+};
+
+window.updatePromoBtn = () => {
+    const checkedCount = document.querySelectorAll('.chk-promo-student:checked').length;
+    const btn = document.getElementById('promoSubmitBtn');
+    const chkAll = document.getElementById('chkPromoAll');
+    
+    btn.disabled = checkedCount === 0;
+    btn.innerHTML = `🚀 Promote ${checkedCount} Student(s)`;
+    
+    if (chkAll) {
+        chkAll.checked = checkedCount === document.querySelectorAll('.chk-promo-student').length;
+    }
+};
+
+window.submitBulkPromotion = async () => {
+    const target = document.getElementById('promoTarget').value;
+    const source = document.getElementById('promoSource').value;
+    
+    if (!target) return showToast("Please select a Destination Grade.", "error");
+    if (target === source) return showToast("Destination Grade must be different from Source Grade.", "error");
+
+    const checkedIds = Array.from(document.querySelectorAll('.chk-promo-student:checked')).map(cb => parseInt(cb.value));
+    if (checkedIds.length === 0) return;
+
+    // --- NEW: COLLISION DETECTOR ---
+    // Check if the destination grade already has students sitting in it!
+    const existingInTarget = window._adminUsers.filter(u => u.role === 'student' && u.grade === target).length;
+
+    if (existingInTarget > 0 && !target.includes('Alumni')) {
+        const warningMsg = `⚠️ CRITICAL COLLISION DETECTED ⚠️\n\nThere are ALREADY ${existingInTarget} students sitting in ${target}!\n\nIf you proceed, the students from ${source} will permanently mix with the existing ${target} students.\n\nRULE: You must promote ${target} to their next grade FIRST to clear the space.\n\nAre you absolutely sure you want to force this and mix the students together?`;
+        
+        if (!confirm(warningMsg)) return; // Stops the process if they click cancel
+    } else {
+        if (!confirm(`Are you sure you want to promote ${checkedIds.length} students to ${target}?`)) return;
+    }
+    // ---------------------------------
+
+    const btn = document.getElementById('promoSubmitBtn');
+    btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:6px"></div> Processing...';
+    btn.disabled = true;
+
+    try {
+        await apiJSON('/api/admin/bulk-promote', { student_ids: checkedIds, new_grade: target });
+        showToast(`Successfully promoted ${checkedIds.length} students to ${target}!`, 'success');
+        closeModal();
+        
+        // Force refresh the UI to show the new class sizes
+        window._adminUsers = await api('/api/admin/users'); 
+        loadAdminUsers('tab-classes');
+    } catch(e) {
+        showToast(e.message, 'error');
+        btn.disabled = false;
+        updatePromoBtn(); 
+    }
+};
+
+
+window.impersonateUser = async (uid, name) => {
+    if(!confirm(`Are you sure you want to login as ${name}? Anything you do will be recorded under their account.`)) return;
+    try {
+        await apiPost(`/api/admin/impersonate/${uid}`);
+        window.location.href = '/dashboard';
+    } catch(e) { showToast(e.message, 'error'); }
+};
+
+
+// ================================================================
+// STUDENT-CENTRIC COURSE MANAGEMENT
+// ================================================================
+
+window.manageStudentCourses = async (sid, studentName) => {
+    openModal(`Manage Courses: ${studentName}`, '<div class="loading-state"><div class="spinner"></div></div>', 'modal-box-lg');
+    try {
+        const data = await api(`/api/admin/students/${sid}/courses`);
+        window._availableCoursesForStudent = data.available;
+        window._selectedCourseIdsForStudent = new Set();
+
+        const gradeFilterOptions = GRADE_OPTIONS.map(g => `<option value="${g.value}">${g.label === '— Select Grade (or leave blank) —' ? 'All Grades' : g.label}</option>`).join('');
+
+        let html = `
+            <div class="tabs mb-16">
+                <button class="tab-btn active" id="btnTabStudentEnrolled" onclick="switchStudentCourseTab('enrolled')">Currently Enrolled (${data.enrolled.length})</button>
+                <button class="tab-btn" id="btnTabStudentAvailable" onclick="switchStudentCourseTab('available')">➕ Add New Courses</button>
+            </div>
+
+            <div id="studentCourseTab-enrolled" style="display:block;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+                    <input type="text" id="studentCourseSearch" class="form-control" style="width:100%; max-width:300px;" placeholder="🔍 Search enrolled courses..." oninput="filterStudentEnrolledCourses()">
+                    ${data.enrolled.length > 0 ? `<button class="btn btn-danger btn-sm" onclick="bulkUnenrollStudentCourses(${sid}, '${escHtml(studentName)}')"><i class="fas fa-trash-alt"></i> Remove Displayed</button>` : ''}
+                </div>
+                <div class="table-wrapper" style="max-height: 400px; overflow-y: auto;">
+                    <table id="studentCourseTable" style="width:100%; font-size:13.5px;">
+                        <thead style="position:sticky; top:0; z-index:1; background:#f8fafc;">
+                            <tr>
+                                <th style="padding:12px; text-align:left;">Course Name</th>
+                                <th style="padding:12px; text-align:left;">Teacher</th>
+                                <th style="padding:12px; text-align:right;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.enrolled.map(c => `
+                                <tr class="student-course-row" data-cid="${c.id}">
+                                    <td class="sc-name" style="padding:12px; border-bottom:1px solid #f1f5f9;">
+                                        <strong>${escHtml(c.name)}</strong> <span class="badge badge-blue">${escHtml(c.code)}</span><br>
+                                        <span class="text-muted text-sm">${escHtml(c.grade || 'Unassigned')}</span>
+                                    </td>
+                                    <td style="padding:12px; border-bottom:1px solid #f1f5f9;">
+                                        ${escHtml(c.teacher_name || 'Unassigned')}
+                                    </td>
+                                    <td style="padding:12px; border-bottom:1px solid #f1f5f9; text-align:right;">
+                                        <button class="btn btn-danger btn-sm" onclick="unenrollStudentFromCourse(${sid}, ${c.id}, '${escHtml(studentName)}')"><i class="fas fa-trash"></i> Remove</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                            ${data.enrolled.length === 0 ? '<tr><td colspan="3" class="text-center text-muted" style="padding:30px;">Student is not enrolled in any courses.</td></tr>' : ''}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="studentCourseTab-available" style="display:none;">
+                <div style="display:flex; gap:10px; margin-bottom:16px;">
+                    <input type="text" id="availCourseSearch" class="form-control" style="flex: 1;" placeholder="Search by course name or code..." oninput="filterAvailableCoursesForStudent()">
+                    <select id="availCourseGrade" class="form-control" style="width:160px;" onchange="filterAvailableCoursesForStudent()">
+                        ${gradeFilterOptions}
+                    </select>
+                </div>
+
+                <div id="availCourseList" style="max-height: 350px; overflow-y: auto; padding-right: 8px; margin-bottom: 20px; border-radius: 8px;">
+                    </div>
+
+                <div class="flex gap-8" style="justify-content:space-between; align-items:center; border-top:1px solid var(--border); padding-top:16px;">
+                    <div class="text-sm" style="color: var(--primary-dark); font-weight: 600;"><strong id="bulkStudentCourseCount">0</strong> courses selected</div>
+                    <div class="flex gap-8">
+                        <button type="button" class="btn btn-secondary" onclick="toggleSelectAllBulkStudentCourses()">Select All Visible</button>
+                        <button type="button" id="bulkEnrollCourseBtn" class="btn btn-primary" disabled onclick="bulkEnrollStudentCourses(${sid}, '${escHtml(studentName)}')">
+                            <i class="fas fa-plus"></i> Enroll in 0 Course(s)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.getElementById('modalBody').innerHTML = html;
+
+        // Try to auto-select the student's grade in the available tab to speed up workflows
+        const student = window._adminUsers.find(u => u.id === sid);
+        if (student && student.grade) {
+            const gradeDropdown = document.getElementById('availCourseGrade');
+            if (gradeDropdown) gradeDropdown.value = student.grade;
+        }
+
+        window.switchStudentCourseTab = (tab) => {
+            document.getElementById('btnTabStudentEnrolled').classList.remove('active');
+            document.getElementById('btnTabStudentAvailable').classList.remove('active');
+            document.getElementById('studentCourseTab-enrolled').style.display = 'none';
+            document.getElementById('studentCourseTab-available').style.display = 'none';
+            
+            if (tab === 'enrolled') {
+                document.getElementById('btnTabStudentEnrolled').classList.add('active');
+                document.getElementById('studentCourseTab-enrolled').style.display = 'block';
+            } else {
+                document.getElementById('btnTabStudentAvailable').classList.add('active');
+                document.getElementById('studentCourseTab-available').style.display = 'block';
+                filterAvailableCoursesForStudent();
+            }
+        };
+
+        window.filterStudentEnrolledCourses = () => {
+            const q = document.getElementById('studentCourseSearch').value.toLowerCase();
+            document.querySelectorAll('.student-course-row').forEach(row => {
+                row.style.display = row.querySelector('.sc-name').textContent.toLowerCase().includes(q) ? '' : 'none';
+            });
+        };
+
+        window.filterAvailableCoursesForStudent = () => {
+            const q = document.getElementById('availCourseSearch').value.toLowerCase();
+            const g = document.getElementById('availCourseGrade').value;
+
+            const filtered = window._availableCoursesForStudent.filter(c => {
+                const matchQ = !q || c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q);
+                const matchG = !g || (c.grade || '') === g;
+                return matchQ && matchG;
+            });
+
+            const listEl = document.getElementById('availCourseList');
+            if (filtered.length === 0) {
+                listEl.innerHTML = '<div class="empty-state text-center text-muted" style="padding:20px; font-size:13px;">No available courses match your criteria.</div>';
+                return;
+            }
+
+            listEl.innerHTML = filtered.map(c => {
+                const isChecked = window._selectedCourseIdsForStudent.has(c.id) ? 'checked' : '';
+                return `
+                    <label class="avail-course-row" style="display:flex; align-items:center; gap:14px; padding:12px 14px; border:1px solid var(--border); border-radius:8px; margin-bottom:8px; cursor:pointer; background:white; transition:all 0.2s;" onmouseover="this.style.background='#f8fafc'; this.style.borderColor='#cbd5e1';" onmouseout="this.style.background='white'; this.style.borderColor='var(--border)';">
+                        <input type="checkbox" class="chk-avail-course" value="${c.id}" ${isChecked} onchange="toggleBulkStudentCourse(${c.id}, this.checked)" style="transform:scale(1.3); cursor:pointer;">
+                        <div style="flex:1;">
+                            <div style="font-weight:600; color:var(--text); font-size: 14px;">
+                                ${escHtml(c.name)} <span class="badge badge-blue" style="font-size:9px; padding:2px 6px; margin-left:6px;">${escHtml(c.code)}</span>
+                            </div>
+                            <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+                                <strong>Teacher:</strong> ${escHtml(c.teacher_name || 'Unassigned')} &nbsp;|&nbsp; 
+                                <strong>Grade:</strong> ${escHtml(c.grade || 'Unassigned')}
+                            </div>
+                        </div>
+                    </label>
+                `;
+            }).join('');
+        };
+
+        window.toggleBulkStudentCourse = (id, checked) => {
+            if (checked) window._selectedCourseIdsForStudent.add(id);
+            else window._selectedCourseIdsForStudent.delete(id);
+            
+            const count = window._selectedCourseIdsForStudent.size;
+            document.getElementById('bulkStudentCourseCount').textContent = count;
+            
+            const btn = document.getElementById('bulkEnrollCourseBtn');
+            btn.disabled = count === 0;
+            btn.innerHTML = `<i class="fas fa-plus"></i> Enroll in ${count} Course(s)`;
+        };
+
+        window.toggleSelectAllBulkStudentCourses = () => {
+            const checkboxes = document.querySelectorAll('.chk-avail-course');
+            if (checkboxes.length === 0) return;
+            
+            const allSelected = Array.from(checkboxes).every(cb => cb.checked);
+            
+            checkboxes.forEach(cb => {
+                cb.checked = !allSelected;
+                toggleBulkStudentCourse(parseInt(cb.value), !allSelected);
+            });
+        };
+
+        window.bulkEnrollStudentCourses = async (sId, sName) => {
+            if (window._selectedCourseIdsForStudent.size === 0) return;
+            
+            const btn = document.getElementById('bulkEnrollCourseBtn');
+            btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:6px"></div> Enrolling...';
+            btn.disabled = true;
+
+            try {
+                const idsArray = Array.from(window._selectedCourseIdsForStudent);
+                await apiJSON(`/api/admin/students/${sId}/courses/enroll/bulk`, { course_ids: idsArray });
+                showToast(`Successfully enrolled in ${idsArray.length} course(s)!`, 'success');
+                
+                manageStudentCourses(sId, sName); // Refresh modal
+            } catch (e) {
+                showToast(e.message, 'error');
+                btn.innerHTML = `<i class="fas fa-plus"></i> Enroll in ${window._selectedCourseIdsForStudent.size} Course(s)`;
+                btn.disabled = false;
+            }
+        };
+
+        window.unenrollStudentFromCourse = async (sId, cId, sName) => {
+            if (!confirm('Are you sure you want to remove this course from the student?')) return;
+            try {
+                await apiDelete(`/api/admin/students/${sId}/courses/${cId}/unenroll`);
+                showToast('Course removed successfully.', 'success');
+                manageStudentCourses(sId, sName); // Refresh modal
+            } catch (e) { showToast(e.message, 'error'); }
+        };
+
+        window.bulkUnenrollStudentCourses = async (sId, sName) => {
+            const visibleRows = Array.from(document.querySelectorAll('.student-course-row')).filter(row => row.style.display !== 'none');
+            const courseIds = visibleRows.map(row => parseInt(row.getAttribute('data-cid')));
+            
+            if (courseIds.length === 0) return;
+            if (!confirm(`Are you sure you want to remove these ${courseIds.length} courses from the student?`)) return;
+
+            try {
+                await apiJSON(`/api/admin/students/${sId}/courses/unenroll/bulk`, { course_ids: courseIds });
+                showToast(`Successfully removed ${courseIds.length} course(s).`, 'success');
+                manageStudentCourses(sId, sName); // Refresh modal
+            } catch (e) { showToast(e.message, 'error'); }
+        };
+
+    } catch (e) {
+        document.getElementById('modalBody').innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+    }
 };

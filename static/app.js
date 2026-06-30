@@ -24,6 +24,19 @@ window.addEventListener('DOMContentLoaded', async () => {
   buildSidebar();
   initializeUserPreferences(); // <--- ADD THIS LINE HERE
 
+
+  // --- IMPERSONATION BANNER ---
+  if (currentUser.is_impersonating) {
+      const banner = document.createElement('div');
+      banner.style.cssText = "background: #dc2626; color: white; padding: 10px 20px; text-align: center; font-weight: 600; font-size: 14px; z-index: 2000; position: fixed; top: 0; left: 0; right: 0; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: flex; justify-content: center; align-items: center; gap: 16px;";
+      banner.innerHTML = `<span><i class="fas fa-mask"></i> You are currently viewing the platform as <strong>${escHtml(currentUser.full_name)}</strong></span> <button onclick="revertImpersonation()" style="padding:6px 16px; background:white; color:#dc2626; border:none; border-radius:6px; font-weight:800; cursor:pointer; font-size:12px; text-transform:uppercase; letter-spacing:1px; box-shadow:0 2px 4px rgba(0,0,0,0.1);">Return to Admin</button>`;
+      document.body.appendChild(banner);
+
+      document.querySelector('.top-header').style.top = '44px';
+      document.querySelector('.sidebar').style.top = '108px';
+      document.querySelector('.app-layout').style.marginTop = '44px';
+  }
+
   // ... rest of your code ...
 
   if (currentUser.must_change_password) {
@@ -873,3 +886,43 @@ function initializeUserPreferences() {
     
     observer.observe(document.body, { childList: true, subtree: true });
 }
+
+
+// ---- Global Action: Revert Impersonation ----
+window.revertImpersonation = async () => {
+    try {
+        await api('/api/auth/revert-impersonation', { method: 'POST' });
+        window.location.href = '/dashboard';
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+// ---- Global Action: Export Table to CSV ----
+window.exportToCSV = (tableSelector, filename) => {
+    const table = document.querySelector(tableSelector);
+    if (!table) return showToast('Table not found.', 'error');
+
+    let csv = [];
+    const rows = table.querySelectorAll('tr');
+
+    for (let i = 0; i < rows.length; i++) {
+        if (rows[i].style.display === 'none') continue; // Skip hidden/filtered rows
+
+        let row = [], cols = rows[i].querySelectorAll('td, th');
+        for (let j = 0; j < cols.length; j++) {
+            // Clean text, remove newlines, escape quotes
+            let text = cols[j].innerText.replace(/(\r\n|\n|\r)/gm, " ").replace(/"/g, '""').trim();
+            row.push('"' + text + '"');
+        }
+        csv.push(row.join(','));
+    }
+
+    const csvFile = new Blob([csv.join('\n')], {type: 'text/csv'});
+    const link = document.createElement('a');
+    link.download = filename;
+    link.href = window.URL.createObjectURL(csvFile);
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('Download started!', 'success');
+};

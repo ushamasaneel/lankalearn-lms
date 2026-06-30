@@ -606,7 +606,12 @@ async function tcLoadGradebook() {
 
   if (!students.length) { panel.innerHTML = emptyState('📊','No students enrolled.'); return; }
 
-  let html = `<div class="alert alert-info mb-16">Showing grades for ${students.length} student(s) · ${assignments.length} assignment(s)</div>`;
+  // REPLACED: Added the flexbox layout and the green Export CSV button here
+  let html = `<div class="alert alert-info mb-16" style="display:flex; justify-content:space-between; align-items:center;">
+      <span>Showing grades for ${students.length} student(s) · ${assignments.length} assignment(s)</span>
+      <button class="btn btn-success btn-sm" onclick="exportToCSV('.gradebook-table', 'Gradebook_Export.csv')"><i class="fas fa-file-excel"></i> Export to Excel</button>
+  </div>`;
+
   html += `<div class="table-wrapper"><table class="gradebook-table"><thead><tr>
     <th>Student</th>
     ${assignments.map(a => `<th title="${escHtml(a.title)}">${escHtml(a.title.slice(0,20))}…<br><span style="font-weight:400;color:var(--text-light)">${a.points}pts</span></th>`).join('')}
